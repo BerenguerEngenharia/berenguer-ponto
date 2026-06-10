@@ -5,15 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
 <title>Berenguer — Controle de Ponto</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;}
-html{touch-action:pan-x pan-y pinch-zoom;}
 body{background:#10152E;font-family:'Barlow',sans-serif;color:#E8ECF8;overscroll-behavior-y:contain;-webkit-text-size-adjust:100%;}
 button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;font-family:inherit;}
 button:active{opacity:.82;transform:scale(.96);}
@@ -544,72 +541,64 @@ var LS = {
     try {
       localStorage.setItem(k, JSON.stringify(v));
     } catch (e) {}
-
-    // ── SUPABASE ──────────────────────────────────────────────────────────────────
-    var SB_URL = "https://nqaqihqororubyldzhps.supabase.co";
-    var SB_KEY = "sb_publishable_XAMe9XJmeMu_ccr1Ii6A1g_fdBSOt1_";
-    function sbHeaders() {
-      return {
-        "Content-Type": "application/json",
-        "apikey": SB_KEY,
-        "Authorization": "Bearer " + SB_KEY
-      };
-    }
-
-    // Lê uma tabela inteira — retorna array ou objeto singleton
-    function sbGet(table) {
-      return fetch(SB_URL + "/rest/v1/" + table + "?select=id,data", {
-        headers: sbHeaders()
-      }).then(function (r) {
-        return r.ok ? r.json() : null;
-      }).then(function (rows) {
-        if (!Array.isArray(rows) || rows.length === 0) return null;
-        if (rows[0].id === "singleton") return rows[0].data;
-        return rows.map(function (r) {
-          return r.data;
-        });
-      }).catch(function () {
-        return null;
-      });
-    }
-
-    // Grava — upsert por id
-    function sbSet(table, value) {
-      var rows = Array.isArray(value) ? value.map(function (item) {
-        return {
-          id: String(item.id),
-          data: item
-        };
-      }) : [{
-        id: "singleton",
-        data: value
-      }];
-      return fetch(SB_URL + "/rest/v1/" + table, {
-        method: "POST",
-        headers: Object.assign({}, sbHeaders(), {
-          "Prefer": "resolution=merge-duplicates,return=minimal"
-        }),
-        body: JSON.stringify(rows)
-      }).catch(function () {});
-    }
-
-    // Salva local imediatamente + Supabase em background
-    function sbSync(table, value) {
-      LS.set("berg_" + table, value);
-      sbSet(table, value);
-    }
-
-    // Carrega do Supabase e atualiza state se tiver dado mais recente
-    function sbLoad(table, setter) {
-      sbGet(table).then(function (data) {
-        if (data) {
-          LS.set("berg_" + table, data);
-          setter(data);
-        }
-      });
-    }
   }
 };
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
+var SB_URL = "https://nqaqihqororubyldzhps.supabase.co";
+var SB_KEY = "sb_publishable_XAMe9XJmeMu_ccr1Ii6A1g_fdBSOt1_";
+function sbHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "apikey": SB_KEY,
+    "Authorization": "Bearer " + SB_KEY
+  };
+}
+function sbGet(table) {
+  return fetch(SB_URL + "/rest/v1/" + table + "?select=id,data", {
+    headers: sbHeaders()
+  }).then(function (r) {
+    return r.ok ? r.json() : null;
+  }).then(function (rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    if (rows[0].id === "singleton") return rows[0].data;
+    return rows.map(function (r) {
+      return r.data;
+    });
+  }).catch(function () {
+    return null;
+  });
+}
+function sbSet(table, value) {
+  var rows = Array.isArray(value) ? value.map(function (item) {
+    return {
+      id: String(item.id),
+      data: item
+    };
+  }) : [{
+    id: "singleton",
+    data: value
+  }];
+  return fetch(SB_URL + "/rest/v1/" + table, {
+    method: "POST",
+    headers: Object.assign({}, sbHeaders(), {
+      "Prefer": "resolution=merge-duplicates,return=minimal"
+    }),
+    body: JSON.stringify(rows)
+  }).catch(function () {});
+}
+function sbSync(table, value) {
+  LS.set("berg_" + table, value);
+  sbSet(table, value);
+}
+function sbLoad(table, setter) {
+  sbGet(table).then(function (data) {
+    if (data) {
+      LS.set("berg_" + table, data);
+      setter(data);
+    }
+  });
+}
 var DATA_VER = "v6";
 try {
   if (localStorage.getItem("berg_ver") !== DATA_VER) {
