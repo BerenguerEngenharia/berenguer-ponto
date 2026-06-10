@@ -543,6 +543,70 @@ var LS = {
     try {
       localStorage.setItem(k, JSON.stringify(v));
     } catch (e) {}
+
+    // ── SUPABASE ──────────────────────────────────────────────────────────────────
+    var SB_URL = "https://nqaqihqororubyldzhps.supabase.co";
+    var SB_KEY = "sb_publishable_XAMe9XJmeMu_ccr1Ii6A1g_fdBSOt1_";
+    function sbHeaders() {
+      return {
+        "Content-Type": "application/json",
+        "apikey": SB_KEY,
+        "Authorization": "Bearer " + SB_KEY
+      };
+    }
+
+    // Lê uma tabela inteira — retorna array ou objeto singleton
+    function sbGet(table) {
+      return fetch(SB_URL + "/rest/v1/" + table + "?select=id,data", {
+        headers: sbHeaders()
+      }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        if (rows[0].id === "singleton") return rows[0].data;
+        return rows.map(function (r) {
+          return r.data;
+        });
+      }).catch(function () {
+        return null;
+      });
+    }
+
+    // Grava — upsert por id
+    function sbSet(table, value) {
+      var rows = Array.isArray(value) ? value.map(function (item) {
+        return {
+          id: String(item.id),
+          data: item
+        };
+      }) : [{
+        id: "singleton",
+        data: value
+      }];
+      return fetch(SB_URL + "/rest/v1/" + table, {
+        method: "POST",
+        headers: Object.assign({}, sbHeaders(), {
+          "Prefer": "resolution=merge-duplicates,return=minimal"
+        }),
+        body: JSON.stringify(rows)
+      }).catch(function () {});
+    }
+
+    // Salva local imediatamente + Supabase em background
+    function sbSync(table, value) {
+      LS.set("berg_" + table, value);
+      sbSet(table, value);
+    }
+
+    // Carrega do Supabase e atualiza state se tiver dado mais recente
+    function sbLoad(table, setter) {
+      sbGet(table).then(function (data) {
+        if (data) {
+          LS.set("berg_" + table, data);
+          setter(data);
+        }
+      });
+    }
   }
 };
 var DATA_VER = "v6";
@@ -1673,21 +1737,42 @@ function App() {
   var [demo, setDemo] = useState(null);
   // session: null = nao logado | {tipo:"admin"} | {tipo:"funcionario", emp:{...}}
   var [session, setSession] = useState(null);
+
+  // Sync local + Supabase ao mudar qualquer estado
   useEffect(() => {
-    LS.set("berg_team", team);
+    if (team !== null) {
+      sbSync("berg_team", team);
+    }
   }, [team]);
   useEffect(() => {
-    LS.set("berg_events", events);
+    if (events !== null) {
+      sbSync("berg_events", events);
+    }
   }, [events]);
   useEffect(() => {
-    LS.set("berg_groups", groups);
+    if (groups !== null) {
+      sbSync("berg_groups", groups);
+    }
   }, [groups]);
   useEffect(() => {
-    LS.set("berg_rates", rates);
+    if (rates !== null) {
+      sbSync("berg_rates", rates);
+    }
   }, [rates]);
   useEffect(() => {
-    LS.set("berg_payments", payments);
+    if (payments !== null) {
+      sbSync("berg_payments", payments);
+    }
   }, [payments]);
+
+  // Carregar do Supabase na inicialização (sobrescreve localStorage se tiver dado mais recente)
+  useEffect(() => {
+    sbLoad("berg_team", setTeam);
+    sbLoad("berg_events", setEvents);
+    sbLoad("berg_groups", setGroups);
+    sbLoad("berg_rates", setRates);
+    sbLoad("berg_payments", setPayments);
+  }, []);
   useEffect(() => {
     var t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
