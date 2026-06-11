@@ -580,7 +580,7 @@ function sbSet(table, value) {
     id: "singleton",
     data: value
   }];
-  return fetch(SB_URL + "/rest/v1/" + table, {
+  return fetch(SB_URL + "/rest/v1/" + table + "?on_conflict=id", {
     method: "POST",
     headers: Object.assign({}, sbHeaders(), {
       "Prefer": "resolution=merge-duplicates,return=minimal"
@@ -591,14 +591,6 @@ function sbSet(table, value) {
 function sbSync(table, value) {
   LS.set("berg_" + table, value);
   sbSet(table, value);
-}
-function sbLoad(table, setter) {
-  sbGet(table).then(function (data) {
-    if (data) {
-      LS.set("berg_" + table, data);
-      setter(data);
-    }
-  });
 }
 var DATA_VER = "v6";
 try {
@@ -1724,32 +1716,51 @@ function App() {
   var [now, setNow] = useState(new Date());
   var [session, setSession] = useState(null);
   var [showQR, setShowQR] = useState(false);
+  var [ready, setReady] = useState(false);
 
-  // Sync Supabase ao mudar estado
+  // Carregar do Supabase ANTES de liberar a UI — evita sobrescrever edições do usuário
   useEffect(() => {
-    if (team !== null) sbSync("berg_team", team);
-  }, [team]);
-  useEffect(() => {
-    if (events !== null) sbSync("berg_events", events);
-  }, [events]);
-  useEffect(() => {
-    if (groups !== null) sbSync("berg_groups", groups);
-  }, [groups]);
-  useEffect(() => {
-    if (rates !== null) sbSync("berg_rates", rates);
-  }, [rates]);
-  useEffect(() => {
-    if (payments !== null) sbSync("berg_payments", payments);
-  }, [payments]);
-
-  // Carregar do Supabase na inicialização
-  useEffect(() => {
-    sbLoad("berg_team", setTeam);
-    sbLoad("berg_events", setEvents);
-    sbLoad("berg_groups", setGroups);
-    sbLoad("berg_rates", setRates);
-    sbLoad("berg_payments", setPayments);
+    Promise.all([sbGet("berg_team"), sbGet("berg_events"), sbGet("berg_groups"), sbGet("berg_rates"), sbGet("berg_payments")]).then(([dTeam, dEvents, dGroups, dRates, dPayments]) => {
+      if (dTeam) {
+        setTeam(dTeam);
+        LS.set("berg_team", dTeam);
+      }
+      if (dEvents) {
+        setEvents(dEvents);
+        LS.set("berg_events", dEvents);
+      }
+      if (dGroups) {
+        setGroups(dGroups);
+        LS.set("berg_groups", dGroups);
+      }
+      if (dRates) {
+        setRates(dRates);
+        LS.set("berg_rates", dRates);
+      }
+      if (dPayments) {
+        setPayments(dPayments);
+        LS.set("berg_payments", dPayments);
+      }
+      setReady(true);
+    });
   }, []);
+
+  // Sync Supabase ao mudar estado — só depois do carregamento inicial concluído
+  useEffect(() => {
+    if (ready) sbSync("berg_team", team);
+  }, [team, ready]);
+  useEffect(() => {
+    if (ready) sbSync("berg_events", events);
+  }, [events, ready]);
+  useEffect(() => {
+    if (ready) sbSync("berg_groups", groups);
+  }, [groups, ready]);
+  useEffect(() => {
+    if (ready) sbSync("berg_rates", rates);
+  }, [rates, ready]);
+  useEffect(() => {
+    if (ready) sbSync("berg_payments", payments);
+  }, [payments, ready]);
   useEffect(() => {
     var t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -1821,6 +1832,26 @@ function App() {
   }, [showToast, events]);
 
   // ── Roteamento ──
+  if (!ready) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: "100vh",
+      background: B.navyDark,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 16
+    }
+  }, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement(Logo, {
+    size: 56
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: B.muted,
+      fontWeight: 700,
+      letterSpacing: "1px"
+    }
+  }, "Carregando..."));
   if (!session) return /*#__PURE__*/React.createElement(LoginScreen, {
     team: team,
     onLogin: s => setSession(s)
