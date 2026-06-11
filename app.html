@@ -4927,6 +4927,12 @@ function RelFuncionarios({
     var r = calcPeriodo(emp.id);
     return r.horas > 0 || getAcumulado(emp.id) > 0;
   });
+  var totalPeriodo = 0;
+  team.forEach(e => {
+    var r = calcPeriodo(e.id),
+      acum = getAcumulado(e.id);
+    totalPeriodo += acum > 0 ? acum : r.total;
+  });
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: B.navyMid,
@@ -5023,7 +5029,33 @@ function RelFuncionarios({
       touchAction: "manipulation"
     },
     onClick: a.fn
-  }, a.l)))), temDados && /*#__PURE__*/React.createElement("button", {
+  }, a.l)))), temDados && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "linear-gradient(135deg,#0f1f10,#081a14)",
+      border: "1px solid " + B.green + "40",
+      borderRadius: 12,
+      padding: "14px 18px",
+      marginBottom: 16,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: B.green,
+      fontWeight: 700,
+      textTransform: "uppercase",
+      letterSpacing: ".8px"
+    }
+  }, "Total a Pagar (periodo)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 26,
+      fontWeight: 900,
+      color: B.green,
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, fmtBRL(totalPeriodo))), temDados && /*#__PURE__*/React.createElement("button", {
     style: {
       ...S.btnGhost,
       width: "100%",
@@ -5531,10 +5563,6 @@ function TabCustos({
       tG: parseFloat(tG.toFixed(2))
     };
   }
-  var grandTotal = 0;
-  team.forEach(e => {
-    grandTotal += calcResumo(e.id).tG;
-  });
   var hasAny = team.some(e => getSessoes(e.id).length > 0);
   function copiarCard(emp, ro, resumo) {
     var sep = "-".repeat(36);
@@ -5656,33 +5684,7 @@ function TabCustos({
       background: r.c,
       flexShrink: 0
     }
-  }), r.t)))), hasAny && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "linear-gradient(135deg,#0f1f10,#081a14)",
-      border: "1px solid " + B.green + "40",
-      borderRadius: 12,
-      padding: "14px 18px",
-      marginBottom: 16,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: B.green,
-      fontWeight: 700,
-      textTransform: "uppercase",
-      letterSpacing: ".8px"
-    }
-  }, "Total Geral a Pagar"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 26,
-      fontWeight: 900,
-      color: B.green,
-      fontVariantNumeric: "tabular-nums"
-    }
-  }, fmtBRL(grandTotal))), !hasAny && /*#__PURE__*/React.createElement(Empty, {
+  }), r.t)))), !hasAny && /*#__PURE__*/React.createElement(Empty, {
     icon: "\uD83D\uDCB0",
     msg: "Nenhum check-in/out completo encontrado."
   }), (groups || []).filter(grp => team.some(e => e.roleGroup === grp.key)).map(grp => /*#__PURE__*/React.createElement("div", {
