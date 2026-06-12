@@ -1126,6 +1126,37 @@ function getLocation() {
   });
 }
 
+// Distancia entre 2 coordenadas em metros (formula de Haversine)
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  var R = 6371000;
+  var toRad = function (d) {
+    return d * Math.PI / 180;
+  };
+  var dLat = toRad(lat2 - lat1),
+    dLng = toRad(lng2 - lng1);
+  var a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// "Local habitual" do evento — primeiro check-in com GPS valido, cronologicamente
+function getEventAnchor(ev) {
+  var pontos = ev.pontos || {};
+  var best = null;
+  Object.keys(pontos).forEach(function (empId) {
+    (pontos[empId].sessions || []).forEach(function (s) {
+      if (s.locIn && (!best || new Date(s.checkIn) < new Date(best.checkIn))) {
+        best = {
+          checkIn: s.checkIn,
+          lat: parseFloat(s.locIn.lat),
+          lng: parseFloat(s.locIn.lng)
+        };
+      }
+    });
+  });
+  return best;
+}
+var LOC_ALERT_METERS = 300;
+
 // ── Motor de Cálculo ──────────────────────────────────────────────────────────
 // 08-17 → 1 diária | 17-23 → hora extra + R$30 janta | 17-02 → 1 diária noturna | 02-08 → hora extra
 // Sáb/Dom: usa totalSab/totalDom como valor final (sem desconto/adicional)
@@ -1557,9 +1588,18 @@ function Empty({
   }, msg));
 }
 function LocLink({
-  loc
+  loc,
+  anchor
 }) {
-  return /*#__PURE__*/React.createElement("a", {
+  var dist = anchor ? Math.round(haversineMeters(anchor.lat, anchor.lng, parseFloat(loc.lat), parseFloat(loc.lng))) : null;
+  var far = dist !== null && dist > LOC_ALERT_METERS;
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 5
+    }
+  }, /*#__PURE__*/React.createElement("a", {
     href: "https://www.google.com/maps?q=" + loc.lat + "," + loc.lng,
     target: "_blank",
     rel: "noreferrer",
@@ -1575,7 +1615,31 @@ function LocLink({
     style: {
       color: B.bolt
     }
-  }, "\u2197"));
+  }, "\u2197")), far && /*#__PURE__*/React.createElement("span", {
+    title: "~" + dist + "m do local habitual",
+    style: {
+      fontSize: 9,
+      fontWeight: 800,
+      color: B.orange,
+      background: B.orange + "18",
+      border: "1px solid " + B.orange + "40",
+      borderRadius: 5,
+      padding: "1px 5px"
+    }
+  }, "\u26A0 ~", dist, "m"));
+}
+function NoLoc() {
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      fontWeight: 700,
+      color: B.dimmer,
+      background: B.dimmer + "15",
+      border: "1px solid " + B.dimmer + "35",
+      borderRadius: 5,
+      padding: "1px 6px"
+    }
+  }, "\uD83D\uDCCD sem localiza\xE7\xE3o");
 }
 function LineCalc({
   label,
@@ -1760,6 +1824,7 @@ function App() {
   var [session, setSession] = useState(null);
   var [showQR, setShowQR] = useState(false);
   var [ready, setReady] = useState(false);
+  var [locExplained, setLocExplained] = useState(() => !!LS.get("berg_loc_explained"));
 
   // Carregar do Supabase ANTES de liberar a UI — evita sobrescrever edições do usuário
   useEffect(() => {
@@ -1933,16 +1998,67 @@ function App() {
     team: team,
     onLogin: s => setSession(s)
   });
-  if (session.tipo === "funcionario") return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement(FuncionarioScreen, {
-    emp: session.emp,
-    team: team,
-    events: events,
-    onRecord: pontoRecord,
-    showToast: showToast,
-    onSair: () => setSession(null)
-  }), toast && /*#__PURE__*/React.createElement(Toast, {
-    toast: toast
-  }));
+  if (session.tipo === "funcionario") {
+    if (!locExplained) return /*#__PURE__*/React.createElement("div", {
+      style: {
+        minHeight: "100vh",
+        background: B.navyDark,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        gap: 18,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 44
+      }
+    }, "\uD83D\uDCCD"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxWidth: 340
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 16,
+        fontWeight: 900,
+        color: B.white,
+        marginBottom: 10
+      }
+    }, "Permitir localiza\xE7\xE3o"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: B.muted,
+        lineHeight: 1.6
+      }
+    }, "Para registrar seu check-in e check-out com mais seguran\xE7a, o sistema pede acesso a sua localiza\xE7\xE3o.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "Quando aparecer a pergunta do navegador, toque em ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: B.bolt
+      }
+    }, "Permitir"), ".", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "Se voc\xEA n\xE3o permitir, o ponto continua funcionando normalmente \u2014 apenas sem registrar o local.")), /*#__PURE__*/React.createElement("button", {
+      style: {
+        ...S.btnBolt,
+        padding: "13px 28px",
+        fontSize: 14
+      },
+      onClick: () => {
+        getLocation();
+        LS.set("berg_loc_explained", true);
+        setLocExplained(true);
+      }
+    }, "Continuar"));
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement(FuncionarioScreen, {
+      emp: session.emp,
+      team: team,
+      events: events,
+      onRecord: pontoRecord,
+      showToast: showToast,
+      onSair: () => setSession(null)
+    }), toast && /*#__PURE__*/React.createElement(Toast, {
+      toast: toast
+    }));
+  }
 
   // Admin
   var ativos = events.filter(e => e.status === "ativo").length;
@@ -3315,126 +3431,131 @@ function CardEvento({
       letterSpacing: "1px",
       marginBottom: 8
     }
-  }, "Registros de Ponto"), memberTeam.map(emp => {
-    var ss = ev.pontos && ev.pontos[emp.id] && ev.pontos[emp.id].sessions || [];
-    if (!ss.length) return /*#__PURE__*/React.createElement("div", {
-      key: emp.id,
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "5px 0",
-        color: B.dimmer,
-        fontSize: 12
-      }
-    }, /*#__PURE__*/React.createElement(Av, {
-      emp: emp,
-      size: 24
-    }), emp.name, " \u2014 sem registros");
-    return /*#__PURE__*/React.createElement("div", {
-      key: emp.id,
-      style: {
-        marginBottom: 10
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        marginBottom: 5
-      }
-    }, /*#__PURE__*/React.createElement(Av, {
-      emp: emp,
-      size: 24
-    }), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 12,
-        fontWeight: 700,
-        color: B.text
-      }
-    }, emp.name)), ss.map((s, i) => {
-      var h = diffH(s.checkIn, s.checkOut);
-      return /*#__PURE__*/React.createElement("div", {
-        key: i,
+  }, "Registros de Ponto"), (() => {
+    var anchor = getEventAnchor(ev);
+    return memberTeam.map(emp => {
+      var ss = ev.pontos && ev.pontos[emp.id] && ev.pontos[emp.id].sessions || [];
+      if (!ss.length) return /*#__PURE__*/React.createElement("div", {
+        key: emp.id,
         style: {
           display: "flex",
+          alignItems: "center",
           gap: 8,
-          padding: "6px 0",
-          borderBottom: "1px solid " + B.navyBorder + "35",
-          alignItems: "flex-start"
+          padding: "5px 0",
+          color: B.dimmer,
+          fontSize: 12
         }
-      }, /*#__PURE__*/React.createElement("div", {
+      }, /*#__PURE__*/React.createElement(Av, {
+        emp: emp,
+        size: 24
+      }), emp.name, " \u2014 sem registros");
+      return /*#__PURE__*/React.createElement("div", {
+        key: emp.id,
         style: {
-          width: 7,
-          height: 7,
-          borderRadius: "50%",
-          background: s.checkOut ? B.bolt : B.orange,
-          marginTop: 4,
-          flexShrink: 0
-        }
-      }), /*#__PURE__*/React.createElement("div", {
-        style: {
-          flex: 1
+          marginBottom: 10
         }
       }, /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
-          gap: 14,
-          flexWrap: "wrap",
-          alignItems: "center"
+          alignItems: "center",
+          gap: 7,
+          marginBottom: 5
         }
-      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 9,
-          color: B.dimmer,
-          textTransform: "uppercase"
-        }
-      }, "Check-in"), /*#__PURE__*/React.createElement("div", {
+      }, /*#__PURE__*/React.createElement(Av, {
+        emp: emp,
+        size: 24
+      }), /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           fontWeight: 700,
           color: B.text
         }
-      }, fmtDT(s.checkIn)), s.locIn && /*#__PURE__*/React.createElement(LocLink, {
-        loc: s.locIn
-      })), s.checkOut && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-        style: {
-          color: B.dimmer
-        }
-      }, "\u2192"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 9,
-          color: B.dimmer,
-          textTransform: "uppercase"
-        }
-      }, "Check-out"), /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 12,
-          fontWeight: 700,
-          color: B.text
-        }
-      }, fmtDT(s.checkOut)), s.locOut && /*#__PURE__*/React.createElement(LocLink, {
-        loc: s.locOut
-      }))), !s.checkOut && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 10,
-          color: B.orange,
-          background: B.orange + "15",
-          padding: "2px 7px",
-          borderRadius: 6
-        }
-      }, "Em andamento..."), h && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          fontWeight: 800,
-          color: B.bolt,
-          background: B.bolt + "15",
-          padding: "3px 9px",
-          borderRadius: 7
-        }
-      }, h, "h"))));
-    }));
-  })))));
+      }, emp.name)), ss.map((s, i) => {
+        var h = diffH(s.checkIn, s.checkOut);
+        return /*#__PURE__*/React.createElement("div", {
+          key: i,
+          style: {
+            display: "flex",
+            gap: 8,
+            padding: "6px 0",
+            borderBottom: "1px solid " + B.navyBorder + "35",
+            alignItems: "flex-start"
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: {
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: s.checkOut ? B.bolt : B.orange,
+            marginTop: 4,
+            flexShrink: 0
+          }
+        }), /*#__PURE__*/React.createElement("div", {
+          style: {
+            flex: 1
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: {
+            display: "flex",
+            gap: 14,
+            flexWrap: "wrap",
+            alignItems: "center"
+          }
+        }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 9,
+            color: B.dimmer,
+            textTransform: "uppercase"
+          }
+        }, "Check-in"), /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 12,
+            fontWeight: 700,
+            color: B.text
+          }
+        }, fmtDT(s.checkIn)), s.locIn ? /*#__PURE__*/React.createElement(LocLink, {
+          loc: s.locIn,
+          anchor: anchor
+        }) : /*#__PURE__*/React.createElement(NoLoc, null)), s.checkOut && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+          style: {
+            color: B.dimmer
+          }
+        }, "\u2192"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 9,
+            color: B.dimmer,
+            textTransform: "uppercase"
+          }
+        }, "Check-out"), /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 12,
+            fontWeight: 700,
+            color: B.text
+          }
+        }, fmtDT(s.checkOut)), s.locOut ? /*#__PURE__*/React.createElement(LocLink, {
+          loc: s.locOut,
+          anchor: anchor
+        }) : /*#__PURE__*/React.createElement(NoLoc, null))), !s.checkOut && /*#__PURE__*/React.createElement("span", {
+          style: {
+            fontSize: 10,
+            color: B.orange,
+            background: B.orange + "15",
+            padding: "2px 7px",
+            borderRadius: 6
+          }
+        }, "Em andamento..."), h && /*#__PURE__*/React.createElement("span", {
+          style: {
+            fontSize: 12,
+            fontWeight: 800,
+            color: B.bolt,
+            background: B.bolt + "15",
+            padding: "3px 9px",
+            borderRadius: 7
+          }
+        }, h, "h"))));
+      }));
+    });
+  })()))));
 }
 function FormEvento({
   initial,
