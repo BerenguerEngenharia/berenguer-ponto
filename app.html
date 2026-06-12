@@ -411,24 +411,6 @@ var S = {
     position: "relative",
     touchAction: "manipulation"
   },
-  ciRoot: {
-    minHeight: "100vh",
-    background: B.navyDark,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 14
-  },
-  ciBox: {
-    background: B.navyMid,
-    border: "1px solid " + B.navyBorder,
-    borderRadius: 16,
-    padding: 22,
-    maxWidth: 400,
-    width: "100%",
-    boxShadow: "0 24px 80px rgba(0,0,0,.5)",
-    textAlign: "center"
-  },
   formCard: {
     background: B.navyMid,
     border: "1px solid " + B.bolt + "30",
@@ -1846,15 +1828,40 @@ function App() {
         LS.set("berg_payments", dPayments);
       }
       // Mescla pontos (tabela separada — cada evento tem sua propria linha)
+      // Migracao defensiva: se berg_pontos ainda nao tem dados para um evento,
+      // recupera de berg_events (legado, caso ainda nao tenha sido stripado) OU
+      // do cache local deste dispositivo (caso este device ainda tenha a copia antiga),
+      // e grava na nova tabela para nao perder o historico.
       var pontosMap = {};
       (pontosRows || []).forEach(function (r) {
         pontosMap[r.id] = r.data;
       });
+      var lsEventsCache = LS.get("berg_events") || [];
+      var lsPontosMap = {};
+      lsEventsCache.forEach(function (ev) {
+        if (ev.pontos && Object.keys(ev.pontos).length) lsPontosMap[ev.id] = ev.pontos;
+      });
       var baseEvents = dEvents || events;
       var eventsComPontos = baseEvents.map(function (ev) {
+        var fromNew = pontosMap[ev.id];
+        var temNovo = fromNew && Object.keys(fromNew).length > 0;
+        if (temNovo) return {
+          ...ev,
+          pontos: fromNew
+        };
+        var fromRemoteLegacy = ev.pontos;
+        var fromLocalLegacy = lsPontosMap[ev.id];
+        var recuperado = fromRemoteLegacy && Object.keys(fromRemoteLegacy).length ? fromRemoteLegacy : fromLocalLegacy && Object.keys(fromLocalLegacy).length ? fromLocalLegacy : null;
+        if (recuperado) {
+          sbSetRow("berg_pontos", ev.id, recuperado); // migra para a nova tabela
+          return {
+            ...ev,
+            pontos: recuperado
+          };
+        }
         return {
           ...ev,
-          pontos: pontosMap[ev.id] || ev.pontos || {}
+          pontos: {}
         };
       });
       setEvents(eventsComPontos);
@@ -2273,308 +2280,6 @@ function BottomNav({
       }
     }, t.label));
   }));
-}
-
-// ── CheckinScreen ─────────────────────────────────────────────────────────────
-function CheckinScreen({
-  ev,
-  team,
-  events = [],
-  onRecord,
-  showToast
-}) {
-  var [empId, setEmpId] = useState(null);
-  var [loading, setLoading] = useState(false);
-  var [done, setDone] = useState(null);
-  if (!ev) return /*#__PURE__*/React.createElement("div", {
-    style: S.ciRoot
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.ciBox
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 44,
-      marginBottom: 12
-    }
-  }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 17,
-      fontWeight: 800,
-      color: B.white
-    }
-  }, "Evento nao encontrado")));
-  var members = (ev.members || []).map(id => team.find(t => t.id === id)).filter(Boolean);
-  var selected = team.find(t => t.id === empId);
-  var ss = ev.pontos && ev.pontos[empId] && ev.pontos[empId].sessions || [];
-  var last = ss[ss.length - 1];
-  var isIn = !!(last && !last.checkOut);
-  var evAberto = events.find(oe => oe.id !== ev.id && (() => {
-    var oss = oe.pontos && oe.pontos[empId] && oe.pontos[empId].sessions || [];
-    var ol = oss[oss.length - 1];
-    return ol && !ol.checkOut;
-  })());
-  function reg(tipo) {
-    if (!empId) {
-      showToast("Selecione seu nome!", "err");
-      return;
-    }
-    if (tipo === "in" && evAberto) {
-      showToast("Em servico em: " + evAberto.name, "err");
-      return;
-    }
-    setLoading(true);
-    getLocation().then(loc => {
-      onRecord(ev.id, empId, tipo, loc);
-      setLoading(false);
-      setDone(tipo);
-    });
-  }
-  if (done) return /*#__PURE__*/React.createElement("div", {
-    style: S.ciRoot
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.ciBox
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 14,
-      display: "flex",
-      justifyContent: "center"
-    }
-  }, /*#__PURE__*/React.createElement(Logo, {
-    size: 48
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 52,
-      marginBottom: 10
-    }
-  }, done === "in" ? "✅" : "👋"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 18,
-      fontWeight: 900,
-      color: done === "in" ? B.bolt : B.red
-    }
-  }, done === "in" ? "Check-in registrado!" : "Check-out registrado!"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: B.muted,
-      marginTop: 8
-    }
-  }, selected && selected.name), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      color: B.bolt,
-      fontWeight: 800,
-      marginTop: 4
-    }
-  }, new Date().toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit"
-  })), /*#__PURE__*/React.createElement("button", {
-    style: {
-      marginTop: 20,
-      width: "100%",
-      padding: 13,
-      borderRadius: 10,
-      border: "none",
-      cursor: "pointer",
-      fontSize: 14,
-      fontWeight: 800,
-      background: B.bolt,
-      color: B.navy
-    },
-    onClick: () => setDone(null)
-  }, "Novo Registro")));
-  return /*#__PURE__*/React.createElement("div", {
-    style: S.ciRoot
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.ciBox
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 12,
-      alignItems: "center",
-      marginBottom: 18,
-      paddingBottom: 16,
-      borderBottom: "1px solid " + B.navyBorder
-    }
-  }, /*#__PURE__*/React.createElement(Logo, {
-    size: 40
-  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 15,
-      fontWeight: 900,
-      color: B.white
-    }
-  }, ev.name), ev.local && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: B.muted
-    }
-  }, "\uD83D\uDCCD ", ev.local), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: B.muted
-    }
-  }, "\uD83D\uDCC5 ", fmtDate(ev.dateStart)))), ev.status === "encerrado" && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#EF444410",
-      border: "1px solid " + B.red + "30",
-      borderRadius: 10,
-      padding: "10px 14px",
-      marginBottom: 14,
-      color: B.red,
-      fontSize: 12,
-      textAlign: "center"
-    }
-  }, "Este evento foi encerrado."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      fontWeight: 700,
-      color: B.muted,
-      textTransform: "uppercase",
-      letterSpacing: ".7px",
-      marginBottom: 8
-    }
-  }, "Quem e voce?"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 7,
-      maxHeight: 220,
-      overflowY: "auto"
-    }
-  }, members.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: B.muted,
-      fontSize: 13,
-      padding: 14,
-      textAlign: "center"
-    }
-  }, "Nenhum funcionario vinculado."), members.map(emp => /*#__PURE__*/React.createElement("div", {
-    key: emp.id,
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      padding: "9px 11px",
-      borderRadius: 9,
-      border: "1px solid " + (empId === emp.id ? emp.color : B.navyBorder),
-      background: empId === emp.id ? emp.color + "18" : "transparent",
-      cursor: "pointer"
-    },
-    onClick: () => setEmpId(emp.id)
-  }, /*#__PURE__*/React.createElement(Av, {
-    emp: emp,
-    size: 40
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      fontWeight: 700,
-      color: B.white
-    }
-  }, emp.name), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: B.muted
-    }
-  }, emp.role)), empId === emp.id && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 16,
-      color: B.bolt
-    }
-  }, "\u2713"))))), empId && /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "9px 13px",
-      borderRadius: 9,
-      border: "1px solid " + (isIn ? B.bolt + "50" : B.navyBorder),
-      background: isIn ? B.bolt + "10" : B.navyMid,
-      marginBottom: 14,
-      fontSize: 12,
-      fontWeight: 700,
-      color: isIn ? B.bolt : B.muted
-    }
-  }, isIn ? "Check-in as " + new Date(last.checkIn).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit"
-  }) : ss.length > 0 ? "Ultimo check-out registrado" : "Sem registro neste evento"), ev.status !== "encerrado" && /*#__PURE__*/React.createElement("div", null, evAberto && !isIn && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#3A1A0A",
-      border: "1px solid " + B.orange + "50",
-      borderRadius: 10,
-      padding: "11px 14px",
-      marginBottom: 12,
-      display: "flex",
-      alignItems: "center",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 18
-    }
-  }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      fontWeight: 800,
-      color: B.orange
-    }
-  }, "Ja em servico em outro evento"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: B.muted
-    }
-  }, "Faca check-out em: ", evAberto.name))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    disabled: loading || !!isIn || !empId || !!evAberto && !isIn,
-    onClick: () => {
-      if (!loading && !isIn && empId && !evAberto) reg("in");
-    },
-    style: {
-      flex: 1,
-      padding: 13,
-      borderRadius: 10,
-      border: "1px solid " + B.bolt + "40",
-      cursor: !empId || isIn || evAberto ? "not-allowed" : "pointer",
-      fontSize: 13,
-      fontWeight: 800,
-      background: B.bolt + "15",
-      color: B.bolt,
-      opacity: !empId || isIn || evAberto ? 0.3 : 1
-    }
-  }, "\u25B6 Check-in"), /*#__PURE__*/React.createElement("button", {
-    disabled: loading || !isIn || !empId,
-    onClick: () => {
-      if (!loading && isIn && empId) reg("out");
-    },
-    style: {
-      flex: 1,
-      padding: 13,
-      borderRadius: 10,
-      border: "1px solid " + B.red + "35",
-      cursor: !empId || !isIn ? "not-allowed" : "pointer",
-      fontSize: 13,
-      fontWeight: 800,
-      background: B.red + "12",
-      color: B.red,
-      opacity: !empId || !isIn ? 0.3 : 1
-    }
-  }, "\u25A0 Check-out"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: B.dimmer,
-      textAlign: "center",
-      marginTop: 14
-    }
-  }, "BERENGUER \u2014 Controle de Ponto")));
 }
 
 // ── TabEventos ────────────────────────────────────────────────────────────────
