@@ -570,6 +570,18 @@ function sbGet(table) {
     return null;
   });
 }
+// Retorna array de {id,data} — usado quando o id da linha nao esta dentro do data (ex: berg_pontos)
+function sbGetAll(table) {
+  return fetch(SB_URL + "/rest/v1/" + table + "?select=id,data", {
+    headers: sbHeaders()
+  }).then(function (r) {
+    return r.ok ? r.json() : [];
+  }).then(function (rows) {
+    return Array.isArray(rows) ? rows : [];
+  }).catch(function () {
+    return [];
+  });
+}
 function sbSet(table, value) {
   var rows = Array.isArray(value) ? value.map(function (item) {
     return {
@@ -591,6 +603,37 @@ function sbSet(table, value) {
 function sbSync(table, value) {
   LS.set("berg_" + table, value);
   sbSet(table, value);
+}
+// Le uma unica linha por id — usado para merge antes de gravar (evita sobrescrita entre dispositivos)
+function sbGetRow(table, id) {
+  return fetch(SB_URL + "/rest/v1/" + table + "?id=eq." + encodeURIComponent(String(id)) + "&select=data", {
+    headers: sbHeaders()
+  }).then(function (r) {
+    return r.ok ? r.json() : [];
+  }).then(function (rows) {
+    return Array.isArray(rows) && rows.length ? rows[0].data : null;
+  }).catch(function () {
+    return null;
+  });
+}
+// Grava apenas uma linha (upsert) — nao afeta as demais linhas da tabela
+function sbSetRow(table, id, data) {
+  return fetch(SB_URL + "/rest/v1/" + table + "?on_conflict=id", {
+    method: "POST",
+    headers: Object.assign({}, sbHeaders(), {
+      "Prefer": "resolution=merge-duplicates,return=minimal"
+    }),
+    body: JSON.stringify([{
+      id: String(id),
+      data: data
+    }])
+  }).catch(function () {});
+}
+function sbDeleteRow(table, id) {
+  return fetch(SB_URL + "/rest/v1/" + table + "?id=eq." + encodeURIComponent(String(id)), {
+    method: "DELETE",
+    headers: sbHeaders()
+  }).catch(function () {});
 }
 var DATA_VER = "v6";
 try {
@@ -1720,14 +1763,10 @@ function App() {
 
   // Carregar do Supabase ANTES de liberar a UI — evita sobrescrever edições do usuário
   useEffect(() => {
-    Promise.all([sbGet("berg_team"), sbGet("berg_events"), sbGet("berg_groups"), sbGet("berg_rates"), sbGet("berg_payments")]).then(([dTeam, dEvents, dGroups, dRates, dPayments]) => {
+    Promise.all([sbGet("berg_team"), sbGet("berg_events"), sbGet("berg_groups"), sbGet("berg_rates"), sbGet("berg_payments"), sbGetAll("berg_pontos")]).then(([dTeam, dEvents, dGroups, dRates, dPayments, pontosRows]) => {
       if (dTeam) {
         setTeam(dTeam);
         LS.set("berg_team", dTeam);
-      }
-      if (dEvents) {
-        setEvents(dEvents);
-        LS.set("berg_events", dEvents);
       }
       if (dGroups) {
         setGroups(dGroups);
@@ -1741,6 +1780,20 @@ function App() {
         setPayments(dPayments);
         LS.set("berg_payments", dPayments);
       }
+      // Mescla pontos (tabela separada — cada evento tem sua propria linha)
+      var pontosMap = {};
+      (pontosRows || []).forEach(function (r) {
+        pontosMap[r.id] = r.data;
+      });
+      var baseEvents = dEvents || events;
+      var eventsComPontos = baseEvents.map(function (ev) {
+        return {
+          ...ev,
+          pontos: pontosMap[ev.id] || ev.pontos || {}
+        };
+      });
+      setEvents(eventsComPontos);
+      LS.set("berg_events", eventsComPontos);
       setReady(true);
     });
   }, []);
@@ -1750,7 +1803,16 @@ function App() {
     if (ready) sbSync("berg_team", team);
   }, [team, ready]);
   useEffect(() => {
-    if (ready) sbSync("berg_events", events);
+    if (!ready) return;
+    LS.set("berg_events", events); // cache local completo (com pontos) para reabrir offline
+    var stripped = events.map(function (ev) {
+      var rest = {
+        ...ev
+      };
+      delete rest.pontos;
+      return rest;
+    });
+    sbSet("berg_events", stripped); // grava metadados sem pontos — pontos vao na tabela berg_pontos
   }, [events, ready]);
   useEffect(() => {
     if (ready) sbSync("berg_groups", groups);
@@ -1785,10 +1847,11 @@ function App() {
         return;
       }
     }
-    setEvents(prev => prev.map(ev => {
-      if (ev.id !== evId) return ev;
+
+    // Aplica o check-in/out num objeto "pontos" (mapa empId -> {sessions:[...]})
+    function applyPonto(pontosObj) {
       var p = {
-        ...ev.pontos
+        ...(pontosObj || {})
       };
       var e = p[empId] || {
         sessions: []
@@ -1796,10 +1859,7 @@ function App() {
       var ss = [...e.sessions];
       var last = ss[ss.length - 1];
       if (tipo === "in") {
-        if (last && !last.checkOut) {
-          showToast("Check-in ja aberto!", "err");
-          return ev;
-        }
+        if (last && !last.checkOut) return null; // ja aberto
         ss.push({
           checkIn: ts,
           checkOut: null,
@@ -1807,28 +1867,45 @@ function App() {
           locOut: null
         });
       } else {
-        if (!last || last.checkOut) {
-          showToast("Sem check-in aberto.", "err");
-          return ev;
-        }
+        if (!last || last.checkOut) return null; // nada para fechar
         ss[ss.length - 1] = {
           ...last,
           checkOut: ts,
           locOut: loc
         };
       }
-      return {
-        ...ev,
-        pontos: {
-          ...p,
-          [empId]: {
-            ...e,
-            sessions: ss
-          }
-        }
+      p[empId] = {
+        ...e,
+        sessions: ss
       };
-    }));
+      return p;
+    }
+    var localEv = events.find(ev => ev.id === evId);
+    if (!localEv) return;
+    var localPontos = applyPonto(localEv.pontos);
+    if (!localPontos) {
+      showToast(tipo === "in" ? "Check-in ja aberto!" : "Sem check-in aberto.", "err");
+      return;
+    }
+
+    // 1) Atualização otimista local — feedback imediato na tela
+    setEvents(prev => prev.map(ev => ev.id === evId ? {
+      ...ev,
+      pontos: localPontos
+    } : ev));
     showToast(tipo === "in" ? "Check-in registrado!" : "Check-out registrado!");
+
+    // 2) Merge com a versao mais recente do Supabase (tabela berg_pontos, 1 linha por evento)
+    //    e grava SOMENTE os pontos deste evento — nunca sobrescreve outros eventos/funcionarios
+    sbGetRow("berg_pontos", evId).then(remotePontos => {
+      var base = remotePontos || localEv.pontos || {};
+      var merged = applyPonto(base) || base; // se ja aplicado remotamente, mantem base
+      sbSetRow("berg_pontos", evId, merged);
+      setEvents(prev => prev.map(ev => ev.id === evId ? {
+        ...ev,
+        pontos: merged
+      } : ev));
+    });
   }, [showToast, events]);
 
   // ── Roteamento ──
@@ -2426,6 +2503,7 @@ function TabEventos({
   }
   function deleteEv(id) {
     setEvents(p => p.filter(e => e.id !== id));
+    sbDeleteRow("berg_pontos", id);
     if (openEv === id) setOpenEv(null);
     showToast("Removido.");
   }
