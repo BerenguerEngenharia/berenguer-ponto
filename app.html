@@ -25,6 +25,8 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
 #root{min-height:100%;background:#10152E;}
+.input-field{background:#10152E;border:1px solid #323D7A;border-radius:7px;color:#E8ECF8;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;width:100%;}
+.input-field:focus{border-color:#F5C518;}
 </style>
 </head>
 <body>
@@ -2120,6 +2122,11 @@ function App() {
     setRates: setRates,
     groups: groups,
     showToast: showToast
+  }), tab === "orcamento" && /*#__PURE__*/React.createElement(TabOrcamento, {
+    team: team,
+    rates: rates,
+    groups: groups,
+    showToast: showToast
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 88
@@ -2218,6 +2225,41 @@ function TopBar({
     onClick: onSair
   }, "\u21A9 Sair")));
 }
+function IcoOrcamento({
+  active
+}) {
+  var c = active ? B.bolt : B.dimmer,
+    w = active ? 2.5 : 2;
+  return /*#__PURE__*/React.createElement("svg", {
+    width: "22",
+    height: "22",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: c,
+    strokeWidth: w,
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+  }), /*#__PURE__*/React.createElement("polyline", {
+    points: "14 2 14 8 20 8"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "16",
+    y1: "13",
+    x2: "8",
+    y2: "13"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "16",
+    y1: "17",
+    x2: "8",
+    y2: "17"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "10",
+    y1: "9",
+    x2: "8",
+    y2: "9"
+  }));
+}
 function BottomNav({
   tab,
   setTab,
@@ -2235,7 +2277,7 @@ function BottomNav({
     badge: null
   }, {
     key: "relatorio",
-    label: "Relatorio",
+    label: "Relatório",
     Icon: IcoRelatorio,
     badge: null
   }, {
@@ -2243,9 +2285,15 @@ function BottomNav({
     label: "Custos",
     Icon: IcoCustos,
     badge: null
+  }, {
+    key: "orcamento",
+    label: "Orçamento",
+    Icon: IcoOrcamento,
+    badge: null
   }];
   var idx = TABS.findIndex(t => t.key === tab);
-  var pillLeft = idx * 25 + 1 + "%";
+  var pct = 100 / TABS.length;
+  var pillLeft = idx * pct + 0.5 + "%";
   return /*#__PURE__*/React.createElement("nav", {
     style: S.bottomNav
   }, /*#__PURE__*/React.createElement("div", {
@@ -2253,7 +2301,7 @@ function BottomNav({
       position: "absolute",
       bottom: 0,
       left: pillLeft,
-      width: "23%",
+      width: pct - 1 + "%",
       height: 2,
       background: B.bolt,
       borderRadius: "2px 2px 0 0",
@@ -2294,6 +2342,754 @@ function BottomNav({
       }
     }, t.label));
   }));
+}
+
+// ── TabOrcamento ──────────────────────────────────────────────────────────────
+function TabOrcamento({
+  team,
+  rates,
+  groups,
+  showToast
+}) {
+  var [nomeEv, setNomeEv] = useState("");
+  var [local, setLocal] = useState("");
+  var [cliente, setCliente] = useState("");
+  var [margem, setMargem] = useState(0);
+  var [dias, setDias] = useState([{
+    id: uid(),
+    data: "",
+    entrada: "08:00",
+    saida: "17:00"
+  }]);
+  var [selecionados, setSel] = useState({});
+
+  // ── helpers ──
+  function getRO(id) {
+    return rates[id] || {
+      totalDia: 0,
+      totalSab: 0,
+      totalDom: 0,
+      horaExtra: 0
+    };
+  }
+  function calcDia(diaDef, ro) {
+    if (!diaDef.data || !diaDef.entrada || !diaDef.saida) return null;
+    var checkIn = diaDef.data + "T" + diaDef.entrada + ":00";
+    var checkOut = diaDef.data + "T" + diaDef.saida + ":00";
+    // Se saída <= entrada, assume que passa da meia noite (adiciona 1 dia)
+    if (diaDef.saida <= diaDef.entrada) {
+      var d = new Date(diaDef.data + "T" + diaDef.saida + ":00");
+      d.setDate(d.getDate() + 1);
+      checkOut = d.toISOString().slice(0, 19);
+    }
+    return calcSessao(checkIn, checkOut, ro);
+  }
+  var empSelecionados = team.filter(e => selecionados[e.id]);
+  var diasValidos = dias.filter(d => d.data && d.entrada && d.saida);
+
+  // Cálculo geral
+  var totalBruto = 0;
+  var linhas = empSelecionados.map(emp => {
+    var ro = getRO(emp.id);
+    var sessoes = diasValidos.map(d => ({
+      dia: d,
+      calc: calcDia(d, ro)
+    })).filter(x => x.calc);
+    var subtotal = sessoes.reduce(function (a, x) {
+      return a + (x.calc ? x.calc.total : 0);
+    }, 0);
+    totalBruto += subtotal;
+    return {
+      emp,
+      ro,
+      sessoes,
+      subtotal
+    };
+  });
+  var valorMargem = parseFloat((totalBruto * (margem / 100)).toFixed(2));
+  var totalFinal = parseFloat((totalBruto + valorMargem).toFixed(2));
+
+  // ── Copiar TXT ──
+  function copiarTxt() {
+    var sep = "─".repeat(40);
+    var lines = ["BERENGUER ELÉTRICA", "ORÇAMENTO DE SERVIÇOS", sep];
+    if (nomeEv) lines.push("Evento:  " + nomeEv);
+    if (local) lines.push("Local:   " + local);
+    if (cliente) lines.push("Cliente: " + cliente);
+    lines.push("Emitido: " + new Date().toLocaleDateString("pt-BR"), sep);
+    lines.push("DIAS DE SERVIÇO:");
+    diasValidos.forEach(function (d) {
+      lines.push("  " + new Date(d.data + "T12:00").toLocaleDateString("pt-BR", {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit"
+      }) + " · " + d.entrada + " → " + d.saida);
+    });
+    lines.push(sep, "EQUIPE E VALORES:");
+    linhas.forEach(function (l) {
+      lines.push("", "► " + l.emp.name + " (" + l.emp.role + ")");
+      l.sessoes.forEach(function (x) {
+        var c = x.calc,
+          d = x.dia;
+        var dtStr = new Date(d.data + "T12:00").toLocaleDateString("pt-BR", {
+          weekday: "short",
+          day: "2-digit",
+          month: "2-digit"
+        });
+        lines.push("  " + dtStr + " " + d.entrada + "–" + d.saida + (c.isSab ? " [SAB]" : c.isDom ? " [DOM]" : ""));
+        if (c.diarias > 0) lines.push("    " + c.diarias + "× Diária (" + fmtBRL(c.vUnit) + "): " + fmtBRL(c.vDiarias));
+        if (c.extraH > 0) lines.push("    " + c.extraH.toFixed(1) + "h extra (" + fmtBRL(c.vHE) + "/h): " + fmtBRL(c.vExtras));
+        if (c.vJanta > 0) lines.push("    Janta: " + fmtBRL(c.vJanta));
+      });
+      lines.push("  SUBTOTAL: " + fmtBRL(l.subtotal));
+    });
+    lines.push(sep, "CUSTO BASE: " + fmtBRL(totalBruto));
+    if (margem > 0) lines.push("MARGEM " + margem + "%: +" + fmtBRL(valorMargem), "TOTAL FINAL: " + fmtBRL(totalFinal));else lines.push("TOTAL: " + fmtBRL(totalFinal));
+    lines.push(sep, "Berenguer Elétrica · berenguerengenharia.github.io");
+    navigator.clipboard.writeText(lines.join("\n")).then(function () {
+      showToast("Copiado!");
+    });
+  }
+
+  // ── Gerar PDF (impressão) ──
+  function gerarPDF() {
+    var DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    var rowsBg = ["#f9f9f9", "#ffffff"];
+    var linhasHTML = linhas.map(function (l, li) {
+      var sessoesHTML = l.sessoes.map(function (x, si) {
+        var c = x.calc,
+          d = x.dia;
+        var dt = new Date(d.data + "T12:00");
+        var dtStr = DIAS_SEMANA[dt.getDay()] + " " + dt.toLocaleDateString("pt-BR");
+        var badge = c.isSab ? "<span class='badge sab'>SAB</span>" : c.isDom ? "<span class='badge dom'>DOM</span>" : "";
+        var detalhe = [];
+        if (c.diarias > 0) detalhe.push(c.diarias + "× Diária (" + fmtBRL(c.vUnit) + "): <b>" + fmtBRL(c.vDiarias) + "</b>");
+        if (c.extraH > 0) detalhe.push(c.extraH.toFixed(1) + "h extra (" + fmtBRL(c.vHE) + "/h): <b>" + fmtBRL(c.vExtras) + "</b>");
+        if (c.vJanta > 0) detalhe.push("Janta: <b>" + fmtBRL(c.vJanta) + "</b>");
+        return "<tr style='background:" + rowsBg[si % 2] + "'>" + "<td>" + dtStr + " " + badge + "<br/><small>" + d.entrada + " → " + d.saida + "</small></td>" + "<td>" + detalhe.join("<br/>") + "</td>" + "<td style='text-align:right;font-weight:700;'>" + fmtBRL(c.total) + "</td>" + "</tr>";
+      }).join("");
+      return "<tr style='background:#10152E;color:#F5C518;'><td colspan='3' style='padding:8px 12px;font-weight:900;font-size:13px;'>" + "⚡ " + l.emp.name + " <span style='font-weight:400;font-size:11px;color:#6B7BB5;'>(" + l.emp.role + ")</span>" + "</td></tr>" + sessoesHTML + "<tr style='background:#e8f4e8;'><td colspan='2' style='font-weight:700;'>Subtotal " + l.emp.name.split(" ")[0] + "</td>" + "<td style='text-align:right;font-weight:900;color:#166534;'>" + fmtBRL(l.subtotal) + "</td></tr>";
+    }).join("");
+    var totalHTML = "<tr style='background:#10152E;'><td colspan='2' style='font-weight:900;font-size:14px;color:#F5C518;'>CUSTO BASE</td>" + "<td style='text-align:right;font-weight:900;font-size:16px;color:#F5C518;'>" + fmtBRL(totalBruto) + "</td></tr>";
+    if (margem > 0) {
+      totalHTML += "<tr style='background:#1B2147;'><td colspan='2' style='color:#ccc;font-size:12px;'>Margem de segurança (" + margem + "%)</td>" + "<td style='text-align:right;color:#F59E0B;font-weight:700;'>+" + fmtBRL(valorMargem) + "</td></tr>" + "<tr style='background:#0f4a0f;'><td colspan='2' style='font-weight:900;font-size:15px;color:#22C55E;'>TOTAL FINAL</td>" + "<td style='text-align:right;font-weight:900;font-size:20px;color:#22C55E;'>" + fmtBRL(totalFinal) + "</td></tr>";
+    }
+    var diasListaHTML = diasValidos.map(function (d) {
+      var dt = new Date(d.data + "T12:00");
+      return "<span class='dia-badge'>" + DIAS_SEMANA[dt.getDay()] + " " + dt.toLocaleDateString("pt-BR") + " · " + d.entrada + " → " + d.saida + "</span>";
+    }).join(" ");
+    var win = window.open("", "_blank");
+    win.document.write("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'/><title>Orçamento — " + nomeEv + "</title><style>" + "*{box-sizing:border-box;margin:0;padding:0;}" + "body{font-family:Arial,sans-serif;color:#1a1a1a;font-size:13px;}" + ".header{background:#10152E;color:#fff;padding:24px 32px;display:flex;align-items:center;gap:20px;}" + ".header svg{flex-shrink:0;}" + ".header-info{flex:1;}" + ".header-info h1{font-size:22px;font-weight:900;color:#F5C518;letter-spacing:2px;}" + ".header-info p{font-size:11px;color:#6B7BB5;margin-top:2px;}" + ".meta{background:#1B2147;color:#fff;padding:16px 32px;display:flex;gap:32px;flex-wrap:wrap;}" + ".meta-item{display:flex;flex-direction:column;gap:2px;}" + ".meta-label{font-size:9px;color:#6B7BB5;text-transform:uppercase;letter-spacing:1px;}" + ".meta-value{font-size:13px;font-weight:700;}" + ".dias-wrap{background:#f0f4ff;padding:12px 32px;border-bottom:1px solid #ddd;}" + ".dias-title{font-size:10px;font-weight:700;color:#3A4580;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;}" + ".dia-badge{display:inline-block;background:#10152E;color:#F5C518;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;margin:2px;}" + ".table-wrap{padding:24px 32px;}" + "table{width:100%;border-collapse:collapse;}" + "th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;}" + "td{padding:7px 12px;border-bottom:1px solid #eee;font-size:12px;}" + ".badge{font-size:9px;font-weight:900;padding:1px 5px;border-radius:4px;margin-left:4px;}" + ".badge.sab{background:#F5C518;color:#1B2147;}.badge.dom{background:#22C55E;color:#fff;}" + ".footer{background:#f9f9f9;border-top:2px solid #10152E;padding:12px 32px;display:flex;justify-content:space-between;align-items:center;}" + ".footer-brand{font-size:11px;color:#6B7BB5;}" + ".footer-date{font-size:11px;color:#6B7BB5;}" + "@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}" + "</style></head><body>" + "<div class='header'>" + "<svg width='48' height='48' viewBox='0 0 44 44' fill='none'>" + "<path d='M22 2 L40 12 L40 32 L22 42 L4 32 L4 12 Z' fill='#1B2147' stroke='#F5C518' stroke-width='1.8'/>" + "<path d='M26 9 L16 23 L22 23 L18 35 L28 19 L22 19 Z' fill='#F5C518'/>" + "</svg>" + "<div class='header-info'>" + "<h1>BERENGUER ELÉTRICA</h1>" + "<p>Orçamento de Serviços Elétricos</p>" + "</div>" + "</div>" + "<div class='meta'>" + (nomeEv ? "<div class='meta-item'><span class='meta-label'>Evento</span><span class='meta-value'>" + nomeEv + "</span></div>" : "") + (local ? "<div class='meta-item'><span class='meta-label'>Local</span><span class='meta-value'>" + local + "</span></div>" : "") + (cliente ? "<div class='meta-item'><span class='meta-label'>Cliente</span><span class='meta-value'>" + cliente + "</span></div>" : "") + "<div class='meta-item'><span class='meta-label'>Emitido em</span><span class='meta-value'>" + new Date().toLocaleDateString("pt-BR") + "</span></div>" + "<div class='meta-item'><span class='meta-label'>Equipe</span><span class='meta-value'>" + empSelecionados.length + " funcionário(s)</span></div>" + "</div>" + "<div class='dias-wrap'>" + "<div class='dias-title'>Dias de Serviço (" + diasValidos.length + ")</div>" + diasListaHTML + "</div>" + "<div class='table-wrap'>" + "<table><thead><tr><th>Data / Horário</th><th>Detalhamento</th><th style='text-align:right'>Valor</th></tr></thead>" + "<tbody>" + linhasHTML + totalHTML + "</tbody></table>" + "</div>" + "<div class='footer'>" + "<span class='footer-brand'>Berenguer Elétrica · berenguerengenharia.github.io</span>" + "<span class='footer-date'>" + new Date().toLocaleString("pt-BR") + "</span>" + "</div>" + "</body></html>");
+    win.document.close();
+    setTimeout(function () {
+      win.print();
+    }, 600);
+  }
+
+  // ── Render ──
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 17,
+      fontWeight: 900,
+      color: B.white,
+      margin: 0
+    }
+  }, "Gerador de Or\xE7amento"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: B.muted
+    }
+  }, "Somente Admin")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: B.navyMid,
+      border: "1px solid " + B.navyBorder,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: B.bolt,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      marginBottom: 12
+    }
+  }, "Identifica\xE7\xE3o"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: "1/-1"
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: B.muted,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 4
+    }
+  }, "Nome do Evento *"), /*#__PURE__*/React.createElement("input", {
+    className: "input-field",
+    value: nomeEv,
+    onChange: e => setNomeEv(e.target.value),
+    placeholder: "Ex: Show XP 2025"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: B.muted,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 4
+    }
+  }, "Local"), /*#__PURE__*/React.createElement("input", {
+    className: "input-field",
+    value: local,
+    onChange: e => setLocal(e.target.value),
+    placeholder: "Ex: Jeunesse Arena"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: B.muted,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 4
+    }
+  }, "Cliente"), /*#__PURE__*/React.createElement("input", {
+    className: "input-field",
+    value: cliente,
+    onChange: e => setCliente(e.target.value),
+    placeholder: "Ex: XP Investimentos"
+  }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: B.muted,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 4
+    }
+  }, "Margem de Seguran\xE7a (%)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    max: "100",
+    className: "input-field",
+    style: {
+      maxWidth: 100
+    },
+    value: margem || "",
+    onChange: e => setMargem(parseFloat(e.target.value) || 0),
+    placeholder: "0"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: B.muted
+    }
+  }, "% acrescido sobre o custo total")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: B.navyMid,
+      border: "1px solid " + B.navyBorder,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: B.bolt,
+      textTransform: "uppercase",
+      letterSpacing: 1
+    }
+  }, "Dias de Servi\xE7o"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnBolt,
+      padding: "5px 12px",
+      fontSize: 11
+    },
+    onClick: () => setDias(p => [...p, {
+      id: uid(),
+      data: "",
+      entrada: "08:00",
+      saida: "17:00"
+    }])
+  }, "+ Dia")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    }
+  }, dias.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: d.id,
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      background: B.navyDark,
+      borderRadius: 9,
+      padding: "8px 10px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: B.dimmer,
+      width: 20,
+      textAlign: "center",
+      flexShrink: 0
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    className: "input-field",
+    style: {
+      flex: 2
+    },
+    value: d.data,
+    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
+      ...x,
+      data: e.target.value
+    } : x))
+  }), /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    className: "input-field",
+    style: {
+      flex: 1
+    },
+    value: d.entrada,
+    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
+      ...x,
+      entrada: e.target.value
+    } : x))
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: B.dimmer,
+      flexShrink: 0
+    }
+  }, "\u2192"), /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    className: "input-field",
+    style: {
+      flex: 1
+    },
+    value: d.saida,
+    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
+      ...x,
+      saida: e.target.value
+    } : x))
+  }), dias.length > 1 && /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnDanger,
+      padding: "4px 8px",
+      fontSize: 12,
+      flexShrink: 0
+    },
+    onClick: () => setDias(p => p.filter(x => x.id !== d.id))
+  }, "\u2715"))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: B.navyMid,
+      border: "1px solid " + B.navyBorder,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: B.bolt,
+      textTransform: "uppercase",
+      letterSpacing: 1
+    }
+  }, "Equipe (", empSelecionados.length, " selecionados)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnGhost,
+      padding: "4px 10px",
+      fontSize: 10
+    },
+    onClick: () => {
+      var o = {};
+      team.forEach(e => {
+        o[e.id] = true;
+      });
+      setSel(o);
+    }
+  }, "Todos"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnGhost,
+      padding: "4px 10px",
+      fontSize: 10
+    },
+    onClick: () => setSel({})
+  }, "Nenhum"))), (groups || []).map(grp => {
+    var membros = team.filter(e => e.roleGroup === grp.key);
+    if (!membros.length) return null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: grp.key,
+      style: {
+        marginBottom: 10
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        color: grp.color,
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        marginBottom: 6,
+        display: "flex",
+        alignItems: "center",
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("span", null, grp.icon), grp.label, " (", membros.length, ")"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 5
+      }
+    }, membros.map(emp => {
+      var sel = !!selecionados[emp.id];
+      var ro = getRO(emp.id);
+      return /*#__PURE__*/React.createElement("div", {
+        key: emp.id,
+        onClick: () => setSel(p => ({
+          ...p,
+          [emp.id]: !p[emp.id]
+        })),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          borderRadius: 9,
+          border: "1px solid " + (sel ? emp.color || B.bolt : B.navyBorder),
+          background: sel ? (emp.color || B.bolt) + "15" : B.navyDark,
+          cursor: "pointer"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: 18,
+          height: 18,
+          borderRadius: 5,
+          border: "2px solid " + (sel ? emp.color || B.bolt : B.dimmer),
+          background: sel ? emp.color || B.bolt : "transparent",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        }
+      }, sel && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 10,
+          color: B.navy,
+          fontWeight: 900
+        }
+      }, "\u2713")), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1,
+          minWidth: 0
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 11,
+          fontWeight: 700,
+          color: B.text,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap"
+        }
+      }, emp.name.split(" ")[0] + " " + emp.name.split(" ").slice(-1)[0]), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 9,
+          color: B.muted
+        }
+      }, ro.totalDia > 0 ? fmtBRL(ro.totalDia) + "/dia" : "sem valor")));
+    })));
+  })), empSelecionados.length > 0 && diasValidos.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: B.bolt,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      marginBottom: 10
+    }
+  }, "Resultado"), linhas.map(l => /*#__PURE__*/React.createElement("div", {
+    key: l.emp.id,
+    style: {
+      background: B.navyMid,
+      border: "1px solid " + B.navyBorder,
+      borderRadius: 12,
+      marginBottom: 10,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 3,
+      background: "linear-gradient(90deg," + (l.emp.color || B.bolt) + ",transparent)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "10px 14px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: B.text
+    }
+  }, l.emp.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 900,
+      color: B.green
+    }
+  }, fmtBRL(l.subtotal))), l.sessoes.map((x, i) => {
+    var c = x.calc,
+      d = x.dia;
+    var dt = new Date(d.data + "T12:00");
+    var DIASN = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        background: B.navyDark,
+        borderRadius: 8,
+        padding: "7px 10px",
+        marginBottom: 5
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 4
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: B.text
+      }
+    }, DIASN[dt.getDay()], " ", dt.toLocaleDateString("pt-BR"), " \xB7 ", d.entrada, " \u2192 ", d.saida, c.isSab && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 6,
+        fontSize: 9,
+        background: B.bolt + "30",
+        color: B.bolt,
+        borderRadius: 4,
+        padding: "1px 5px",
+        fontWeight: 800
+      }
+    }, "SAB"), c.isDom && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 6,
+        fontSize: 9,
+        background: B.green + "30",
+        color: B.green,
+        borderRadius: 4,
+        padding: "1px 5px",
+        fontWeight: 800
+      }
+    }, "DOM")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        fontWeight: 800,
+        color: B.green
+      }
+    }, fmtBRL(c.total))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap"
+      }
+    }, c.diarias > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: B.muted
+      }
+    }, c.diarias, "\xD7 di\xE1ria (", fmtBRL(c.vUnit), "): ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: "#6366f1"
+      }
+    }, fmtBRL(c.vDiarias))), c.extraH > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: B.muted
+      }
+    }, c.extraH.toFixed(1), "h extra: ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: B.orange
+      }
+    }, fmtBRL(c.vExtras))), c.vJanta > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: B.muted
+      }
+    }, "Janta: ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: "#0ea5e9"
+      }
+    }, fmtBRL(c.vJanta)))));
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "linear-gradient(135deg,#0f1f10,#081a14)",
+      border: "1px solid " + B.green + "40",
+      borderRadius: 12,
+      padding: "14px 18px",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: margem > 0 ? 8 : 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: B.green,
+      textTransform: "uppercase",
+      letterSpacing: .8
+    }
+  }, "Custo Base"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 22,
+      fontWeight: 900,
+      color: B.green
+    }
+  }, fmtBRL(totalBruto))), margem > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingTop: 8,
+      borderTop: "1px solid " + B.green + "30",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: B.orange
+    }
+  }, "+ Margem ", margem, "%"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      color: B.orange
+    }
+  }, "+", fmtBRL(valorMargem))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingTop: 8,
+      borderTop: "1px solid " + B.green + "30"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: B.white
+    }
+  }, "TOTAL FINAL"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 28,
+      fontWeight: 900,
+      color: B.white
+    }
+  }, fmtBRL(totalFinal))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnGhost,
+      padding: 13,
+      fontSize: 13,
+      fontWeight: 700,
+      color: B.bolt,
+      borderColor: B.bolt + "40"
+    },
+    onClick: copiarTxt
+  }, "\uD83D\uDCC4 Copiar .txt"), /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnBolt,
+      padding: 13,
+      fontSize: 13
+    },
+    onClick: gerarPDF
+  }, "\uD83D\uDDA8\uFE0F Gerar PDF"))), empSelecionados.length === 0 && diasValidos.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "24px 0",
+      color: B.muted,
+      fontSize: 13
+    }
+  }, "Selecione ao menos um funcion\xE1rio para calcular."), diasValidos.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "24px 0",
+      color: B.muted,
+      fontSize: 13
+    }
+  }, "Preencha ao menos um dia de servi\xE7o para calcular."));
 }
 
 // ── TabEventos ────────────────────────────────────────────────────────────────
