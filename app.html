@@ -1898,7 +1898,13 @@ function App() {
     if (ready) sbSync("berg_groups", groups);
   }, [groups, ready]);
   useEffect(() => {
-    if (ready) sbSync("berg_rates", rates);
+    if (!ready) return;
+    var t = setTimeout(function () {
+      sbSync("berg_rates", rates);
+    }, 800);
+    return function () {
+      clearTimeout(t);
+    };
   }, [rates, ready]);
   useEffect(() => {
     if (ready) sbSync("berg_payments", payments);
