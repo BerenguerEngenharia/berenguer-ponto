@@ -1823,7 +1823,7 @@ function IcoCustos({
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 function App() {
   var [team, setTeam] = useState(() => LS.get("berg_team") || SEED_TEAM);
-  var [events, setEvents] = useState(() => LS.get("berg_events") || []);
+  var [events, setEvents] = useState([]); // nunca inicializa do cache — Supabase é a fonte
   var [groups, setGroups] = useState(() => LS.get("berg_groups") || DEFAULT_GROUPS);
   var [rates, setRates] = useState(() => LS.get("berg_rates") || SEED_RATES);
   var [payments, setPayments] = useState(() => LS.get("berg_payments") || []);
@@ -1873,29 +1873,19 @@ function App() {
         });
         setEvents(eventsComPontos);
         LS.set("berg_events", eventsComPontos);
-      } else {
-        // Offline: usa cache local mas injeta pontos do Supabase se tiver
-        var cached = LS.get("berg_events") || [];
-        var cachedComPontos = cached.map(function (ev) {
-          return Object.assign({}, ev, {
-            pontos: pontosMap[ev.id] || ev.pontos || {}
-          });
-        });
-        setEvents(cachedComPontos);
       }
+      // Se Supabase não respondeu (offline real): fica lista vazia
+      // Melhor mostrar vazio do que ressuscitar eventos deletados
+
       setReady(true);
     });
   }, []);
 
   // Sync Supabase ao mudar estado — só depois do carregamento inicial concluído
-  // NOTA: events NÃO tem sync automático — é gravado explicitamente em cada ação admin
-  // para evitar que um celular com versão antiga sobrescreva dados de outro dispositivo
+  // NOTA: events NÃO tem sync automático — gravado explicitamente em cada ação admin
   useEffect(() => {
     if (ready) sbSync("berg_team", team);
   }, [team, ready]);
-  useEffect(() => {
-    if (ready) LS.set("berg_events", events);
-  }, [events, ready]); // só cache local
   useEffect(() => {
     if (ready) sbSync("berg_groups", groups);
   }, [groups, ready]);
@@ -3147,11 +3137,7 @@ function TabEventos({
     if (openEv === id) setOpenEv(null);
   }
   function deleteEv(id) {
-    setEvents(p => {
-      var next = p.filter(e => e.id !== id);
-      LS.set("berg_events", next); // atualiza cache local imediatamente
-      return next;
-    });
+    setEvents(p => p.filter(e => e.id !== id));
     sbDeleteEvent(id);
     if (openEv === id) setOpenEv(null);
     showToast("Removido.");
