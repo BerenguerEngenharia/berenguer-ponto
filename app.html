@@ -6926,7 +6926,14 @@ function FuncionarioScreen({
   onSair
 }) {
   var isEncarregado = emp.roleGroup === "encarregado";
-  var meusEventos = events.filter(ev => (ev.members || []).includes(emp.id));
+  var meusEventos = events.filter(ev => {
+    var members = ev.members || [];
+    // Está na lista de escalados
+    if (members.includes(emp.id)) return true;
+    // Encarregado: também mostra eventos onde tem pontos registrados
+    if (isEncarregado && ev.pontos && ev.pontos[emp.id]) return true;
+    return false;
+  });
   var [openEv, setOpenEv] = useState(null);
   function reg(evId, empId, tipo) {
     if (tipo === "in") {
@@ -7043,7 +7050,13 @@ function FuncionarioScreen({
   }, "Voce nao esta escalado em nenhum evento ativo.", /*#__PURE__*/React.createElement("br", null), "Consulte seu encarregado.")), meusEventos.map(ev => {
     var isAtivo = ev.status === "ativo";
     var isOpen = openEv === ev.id;
-    var memberTeam = isEncarregado ? team.filter(m => (ev.members || []).includes(m.id)) : [emp];
+    var membersIds = ev.members || [];
+    var memberTeam = isEncarregado ? (() => {
+      // Todos escalados + o próprio encarregado (se não estiver na lista)
+      var lista = team.filter(m => membersIds.includes(m.id));
+      if (!lista.find(m => m.id === emp.id)) lista = [emp, ...lista];
+      return lista;
+    })() : [emp];
     return /*#__PURE__*/React.createElement("div", {
       key: ev.id,
       style: {
