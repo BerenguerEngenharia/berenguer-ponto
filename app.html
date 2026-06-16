@@ -586,6 +586,27 @@ function sbSync(table, value) {
   LS.set("berg_" + table, value);
   sbSet(table, value);
 }
+
+// Grava um único evento no Supabase (sem pontos) com retry em caso de falha de rede
+function sbSaveEvent(ev, attempt) {
+  attempt = attempt || 1;
+  var stripped = Object.assign({}, ev);
+  delete stripped.pontos;
+  sbSetRow("berg_events", ev.id, stripped).then(function (r) {
+    if (!r && attempt < 4) {
+      var delay = [0, 3000, 10000, 30000][attempt] || 30000;
+      setTimeout(function () {
+        sbSaveEvent(ev, attempt + 1);
+      }, delay);
+    }
+  });
+}
+
+// Deleta um evento do Supabase por ID
+function sbDeleteEvent(id) {
+  sbDeleteRow("berg_events", id);
+  sbDeleteRow("berg_pontos", id);
+}
 // Le uma unica linha por id — usado para merge antes de gravar (evita sobrescrita entre dispositivos)
 function sbGetRow(table, id) {
   return fetch(SB_URL + "/rest/v1/" + table + "?id=eq." + encodeURIComponent(String(id)) + "&select=data", {
@@ -609,7 +630,11 @@ function sbSetRow(table, id, data) {
       id: String(id),
       data: data
     }])
-  }).catch(function () {});
+  }).then(function (r) {
+    return r.ok;
+  }).catch(function () {
+    return false;
+  });
 }
 function sbDeleteRow(table, id) {
   return fetch(SB_URL + "/rest/v1/" + table + "?id=eq." + encodeURIComponent(String(id)), {
@@ -1871,21 +1896,14 @@ function App() {
   }, []);
 
   // Sync Supabase ao mudar estado — só depois do carregamento inicial concluído
+  // NOTA: events NÃO tem sync automático — é gravado explicitamente em cada ação admin
+  // para evitar que um celular com versão antiga sobrescreva dados de outro dispositivo
   useEffect(() => {
     if (ready) sbSync("berg_team", team);
   }, [team, ready]);
   useEffect(() => {
-    if (!ready) return;
-    LS.set("berg_events", events); // cache local completo (com pontos) para reabrir offline
-    var stripped = events.map(function (ev) {
-      var rest = {
-        ...ev
-      };
-      delete rest.pontos;
-      return rest;
-    });
-    sbSet("berg_events", stripped); // grava metadados sem pontos — pontos vao na tabela berg_pontos
-  }, [events, ready]);
+    if (ready) LS.set("berg_events", events);
+  }, [events, ready]); // só cache local
   useEffect(() => {
     if (ready) sbSync("berg_groups", groups);
   }, [groups, ready]);
@@ -2295,48 +2313,65 @@ function TabEventos({
   var [openEv, setOpenEv] = useState(null);
   var [qrEv, setQrEv] = useState(null);
   function createEv(data) {
-    setEvents(p => [{
+    var newEv = {
       id: uid(),
       status: "ativo",
       createdAt: tsNow(),
       pontos: {},
       ...data
-    }, ...p]);
+    };
+    setEvents(p => [newEv, ...p]);
+    sbSaveEvent(newEv);
     setCreating(false);
     showToast("Evento criado!");
   }
   function saveEditEv(data) {
-    setEvents(p => p.map(e => e.id === editingEv.id ? {
-      ...e,
-      ...data
-    } : e));
+    var updated = null;
+    setEvents(p => p.map(e => {
+      if (e.id !== editingEv.id) return e;
+      updated = {
+        ...e,
+        ...data
+      };
+      return updated;
+    }));
+    if (updated) sbSaveEvent(updated);
     setEditingEv(null);
     showToast("Evento atualizado!");
   }
   function closeEv(id) {
-    setEvents(p => p.map(e => e.id === id ? {
-      ...e,
-      status: "encerrado",
-      closedAt: tsNow()
-    } : e));
+    var updated = null;
+    setEvents(p => p.map(e => {
+      if (e.id !== id) return e;
+      updated = {
+        ...e,
+        status: "encerrado",
+        closedAt: tsNow()
+      };
+      return updated;
+    }));
+    if (updated) sbSaveEvent(updated);
     showToast("Encerrado.");
     if (openEv === id) setOpenEv(null);
   }
   function deleteEv(id) {
     setEvents(p => p.filter(e => e.id !== id));
-    sbDeleteRow("berg_pontos", id);
+    sbDeleteEvent(id);
     if (openEv === id) setOpenEv(null);
     showToast("Removido.");
   }
   function toggleEmp(evId, empId) {
+    var updated = null;
     setEvents(p => p.map(ev => {
       if (ev.id !== evId) return ev;
       var m = ev.members || [];
-      return {
+      updated = {
         ...ev,
         members: m.includes(empId) ? m.filter(x => x !== empId) : [...m, empId]
       };
+      return updated;
     }));
+    if (updated) sbSaveEvent(updated);
   }
   function checkinUrl() {
     return window.location.href.split("?")[0];
