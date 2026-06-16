@@ -642,7 +642,7 @@ function sbDeleteRow(table, id) {
     headers: sbHeaders()
   }).catch(function () {});
 }
-var DATA_VER = "v6";
+var DATA_VER = "v8";
 try {
   if (localStorage.getItem("berg_ver") !== DATA_VER) {
     ["berg_team", "berg_events", "berg_groups", "berg_rates", "berg_payments"].forEach(function (k) {
@@ -1833,9 +1833,12 @@ function App() {
   var [ready, setReady] = useState(false);
   var [locExplained, setLocExplained] = useState(() => !!LS.get("berg_loc_explained"));
 
-  // Carregar do Supabase ANTES de liberar a UI — evita sobrescrever edições do usuário
+  // ── Carregamento inicial do Supabase ────────────────────────────────────────
+  // Regra simples: Supabase é a fonte da verdade.
+  // O cache local (LS) é apenas fallback offline — NUNCA sobrescreve o Supabase.
   useEffect(() => {
     Promise.all([sbGet("berg_team"), sbGet("berg_events"), sbGet("berg_groups"), sbGet("berg_rates"), sbGet("berg_payments"), sbGetAll("berg_pontos")]).then(([dTeam, dEvents, dGroups, dRates, dPayments, pontosRows]) => {
+      // Cada tabela: se Supabase respondeu, usa. Senão, mantém o que já tem (cache local).
       if (dTeam) {
         setTeam(dTeam);
         LS.set("berg_team", dTeam);
@@ -1852,45 +1855,32 @@ function App() {
         setPayments(dPayments);
         LS.set("berg_payments", dPayments);
       }
-      // Mescla pontos (tabela separada — cada evento tem sua propria linha)
-      // Migracao defensiva: se berg_pontos ainda nao tem dados para um evento,
-      // recupera de berg_events (legado, caso ainda nao tenha sido stripado) OU
-      // do cache local deste dispositivo (caso este device ainda tenha a copia antiga),
-      // e grava na nova tabela para nao perder o historico.
+
+      // Eventos: monta a lista definitiva a partir do Supabase,
+      // injetando os pontos da tabela berg_pontos (uma linha por evento).
+      // Se Supabase não respondeu (offline), usa o cache local como estava.
       var pontosMap = {};
       (pontosRows || []).forEach(function (r) {
         pontosMap[r.id] = r.data;
       });
-      var lsEventsCache = LS.get("berg_events") || [];
-      var lsPontosMap = {};
-      lsEventsCache.forEach(function (ev) {
-        if (ev.pontos && Object.keys(ev.pontos).length) lsPontosMap[ev.id] = ev.pontos;
-      });
-      var baseEvents = dEvents || events;
-      var eventsComPontos = baseEvents.map(function (ev) {
-        var fromNew = pontosMap[ev.id];
-        var temNovo = fromNew && Object.keys(fromNew).length > 0;
-        if (temNovo) return {
-          ...ev,
-          pontos: fromNew
-        };
-        var fromRemoteLegacy = ev.pontos;
-        var fromLocalLegacy = lsPontosMap[ev.id];
-        var recuperado = fromRemoteLegacy && Object.keys(fromRemoteLegacy).length ? fromRemoteLegacy : fromLocalLegacy && Object.keys(fromLocalLegacy).length ? fromLocalLegacy : null;
-        if (recuperado) {
-          sbSetRow("berg_pontos", ev.id, recuperado); // migra para a nova tabela
-          return {
-            ...ev,
-            pontos: recuperado
-          };
-        }
-        return {
-          ...ev,
-          pontos: {}
-        };
-      });
-      setEvents(eventsComPontos);
-      LS.set("berg_events", eventsComPontos);
+      if (dEvents) {
+        var eventsComPontos = dEvents.map(function (ev) {
+          return Object.assign({}, ev, {
+            pontos: pontosMap[ev.id] || {}
+          });
+        });
+        setEvents(eventsComPontos);
+        LS.set("berg_events", eventsComPontos);
+      } else {
+        // Offline: usa cache local mas injeta pontos do Supabase se tiver
+        var cached = LS.get("berg_events") || [];
+        var cachedComPontos = cached.map(function (ev) {
+          return Object.assign({}, ev, {
+            pontos: pontosMap[ev.id] || ev.pontos || {}
+          });
+        });
+        setEvents(cachedComPontos);
+      }
       setReady(true);
     });
   }, []);
@@ -2355,7 +2345,11 @@ function TabEventos({
     if (openEv === id) setOpenEv(null);
   }
   function deleteEv(id) {
-    setEvents(p => p.filter(e => e.id !== id));
+    setEvents(p => {
+      var next = p.filter(e => e.id !== id);
+      LS.set("berg_events", next); // atualiza cache local imediatamente
+      return next;
+    });
     sbDeleteEvent(id);
     if (openEv === id) setOpenEv(null);
     showToast("Removido.");
