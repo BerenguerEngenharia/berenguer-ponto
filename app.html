@@ -590,16 +590,27 @@ function sbSync(table, value) {
 }
 
 // Grava um único evento no Supabase (sem pontos) com retry em caso de falha de rede
-function sbSaveEvent(ev, attempt) {
+function sbSaveEvent(ev, attempt, onDone) {
   attempt = attempt || 1;
   var stripped = Object.assign({}, ev);
   delete stripped.pontos;
-  sbSetRow("berg_events", ev.id, stripped).then(function (r) {
-    if (!r && attempt < 4) {
-      var delay = [0, 3000, 10000, 30000][attempt] || 30000;
+  sbSetRow("berg_events", ev.id, stripped).then(function (ok) {
+    if (ok) {
+      if (onDone) onDone(true);
+    } else if (attempt < 5) {
+      var delays = [0, 2000, 5000, 15000, 30000];
       setTimeout(function () {
-        sbSaveEvent(ev, attempt + 1);
-      }, delay);
+        sbSaveEvent(ev, attempt + 1, onDone);
+      }, delays[attempt] || 30000);
+    } else {
+      if (onDone) onDone(false);
+    }
+  }).catch(function () {
+    if (attempt < 5) {
+      var delays = [0, 2000, 5000, 15000, 30000];
+      setTimeout(function () {
+        sbSaveEvent(ev, attempt + 1, onDone);
+      }, delays[attempt] || 30000);
     }
   });
 }
@@ -3103,9 +3114,11 @@ function TabEventos({
       ...data
     };
     setEvents(p => [newEv, ...p]);
-    sbSaveEvent(newEv);
     setCreating(false);
     showToast("Evento criado!");
+    sbSaveEvent(newEv, 1, function (ok) {
+      if (!ok) showToast("Erro ao salvar evento no servidor.", "err");
+    });
   }
   function saveEditEv(data) {
     var ev = events.find(function (e) {
@@ -3114,9 +3127,11 @@ function TabEventos({
     if (!ev) return;
     var updated = Object.assign({}, ev, data);
     setEvents(p => p.map(e => e.id === updated.id ? updated : e));
-    sbSaveEvent(updated);
     setEditingEv(null);
     showToast("Evento atualizado!");
+    sbSaveEvent(updated, 1, function (ok) {
+      if (!ok) showToast("Erro ao salvar no servidor.", "err");
+    });
   }
   function closeEv(id) {
     var ev = events.find(function (e) {
@@ -3128,9 +3143,11 @@ function TabEventos({
       closedAt: tsNow()
     });
     setEvents(p => p.map(e => e.id === id ? updated : e));
-    sbSaveEvent(updated);
     showToast("Encerrado.");
     if (openEv === id) setOpenEv(null);
+    sbSaveEvent(updated, 1, function (ok) {
+      if (!ok) showToast("Erro ao salvar no servidor.", "err");
+    });
   }
   function deleteEv(id) {
     setEvents(p => p.filter(e => e.id !== id));
@@ -3144,17 +3161,20 @@ function TabEventos({
     });
     if (!ev) return;
     var m = ev.members || [];
+    var adicionando = !m.includes(empId);
     var updated = Object.assign({}, ev, {
-      members: m.includes(empId) ? m.filter(function (x) {
+      members: adicionando ? [...m, empId] : m.filter(function (x) {
         return x !== empId;
-      }) : [...m, empId]
+      })
     });
     setEvents(function (p) {
       return p.map(function (e) {
         return e.id === evId ? updated : e;
       });
     });
-    sbSaveEvent(updated);
+    sbSaveEvent(updated, 1, function (ok) {
+      if (ok) showToast(adicionando ? "Funcionário escalado!" : "Funcionário removido da escala.");else showToast("Falha ao salvar. Tente novamente.", "err");
+    });
   }
   function checkinUrl() {
     return window.location.href.split("?")[0];
