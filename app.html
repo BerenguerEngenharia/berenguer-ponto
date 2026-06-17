@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260617172921"/>
+<meta name="build" content="20260617183656"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
@@ -1192,43 +1192,71 @@ function calcSessao(checkIn, checkOut, ro) {
     isSab = dow === 6,
     isDom = dow === 0;
   var vUnit = isSab ? tSab : isDom ? tDom : tDia;
-  var STEP = 1 / 60,
-    totalMin = (fim - ini) / 60000;
-  var zDia = 0,
-    zExTarde = 0,
-    zNoite = 0,
-    zMadrug = 0;
-  for (var m = 0; m < totalMin; m++) {
-    var t = new Date(ini.getTime() + m * 60000),
-      h = t.getHours() + t.getMinutes() / 60;
-    if (h >= 8 && h < 17) zDia += STEP;else if (h >= 17 && h < 23) zExTarde += STEP;else if (h >= 23 && h <= 23.99 || h < 2) zNoite += STEP;else if (h >= 2 && h < 8) zMadrug += STEP;
-  }
+  var hIni = ini.getHours() + ini.getMinutes() / 60;
+  var duracaoH = (fim - ini) / 3600000;
+  // hFimCorrido: hora de fim em escala corrida (passa da meia noite = >24)
+  var hFimCorrido = hIni + duracaoH;
   var diarias = 0,
+    meiasDiarias = 0,
     extraH = 0,
     addJanta = false;
-  if (zDia >= 7.5) diarias++;else if (zDia > 0) extraH += zDia;
-  var totalNoite = zExTarde + zNoite;
-  if (totalNoite >= 7.5) diarias++;else {
-    extraH += totalNoite;
-    if (zExTarde > 0.5) addJanta = true;
+
+  // ── TURNO DIURNO: abre entre 08h e 17h ───────────────────────────────────
+  if (hIni >= 8 && hIni < 17) {
+    if (hFimCorrido >= 12) {
+      diarias++; // fecha >= 12h → diária completa
+    } else {
+      meiasDiarias++; // fecha < 12h → meia diária
+    }
+    // Horas após 17h (se não virar diária noturna)
+    if (hFimCorrido > 17) {
+      if (hFimCorrido >= 24) {
+        diarias++; // chegou à meia noite → diária noturna
+        if (hFimCorrido > 26) extraH += hFimCorrido - 26; // além das 02h → extra
+      } else {
+        extraH += hFimCorrido - 17; // hora extra tarde
+        if (hFimCorrido >= 23) addJanta = true; // janta só se fechar >= 23h
+      }
+    }
   }
-  extraH += zMadrug;
-  var vDiarias = parseFloat((diarias * vUnit).toFixed(2));
+
+  // ── TURNO NOTURNO: abre entre 17h e 23h59 ────────────────────────────────
+  else if (hIni >= 17 && hIni < 24) {
+    if (hFimCorrido >= 24) {
+      diarias++; // chegou à meia noite → diária noturna
+      if (hFimCorrido > 26) extraH += hFimCorrido - 26; // além das 02h → extra
+    } else {
+      extraH += hFimCorrido - hIni; // hora extra
+      if (hFimCorrido >= 23) addJanta = true; // janta só se fechar >= 23h
+    }
+  }
+
+  // ── MADRUGADA: abre entre 02h e 07h59 ────────────────────────────────────
+  else if (hIni >= 2 && hIni < 8) {
+    var fimMadrug = Math.min(hFimCorrido, 8);
+    extraH += fimMadrug - hIni; // hora extra até 08h
+    if (hFimCorrido > 8) {
+      // continua depois das 08h → regra diurna
+      if (hFimCorrido >= 12) diarias++;else meiasDiarias++;
+    }
+  }
+  var vDiarias = parseFloat((diarias * vUnit + meiasDiarias * (vUnit / 2)).toFixed(2));
   var vExtras = parseFloat((extraH * he).toFixed(2));
   var vJanta = addJanta ? JANTA : 0;
   return {
-    diarias: diarias,
+    diarias,
+    meiasDiarias,
     extraH: parseFloat(extraH.toFixed(2)),
-    vDiarias: vDiarias,
-    vExtras: vExtras,
-    vJanta: vJanta,
-    vUnit: vUnit,
+    vDiarias,
+    vExtras,
+    vJanta,
+    vUnit,
     vHE: he,
-    isSab: isSab,
-    isDom: isDom,
+    isSab,
+    isDom,
     total: parseFloat((vDiarias + vExtras + vJanta).toFixed(2)),
-    checkIn: checkIn,
-    checkOut: checkOut
+    checkIn,
+    checkOut
   };
 }
 function getRO(rates, id) {
