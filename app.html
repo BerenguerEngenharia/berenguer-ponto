@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260617183656"/>
+<meta name="build" content="20260617184216"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
@@ -6334,12 +6334,23 @@ function TabCustos({
 }) {
   var [filterEv, setFilterEv] = useState("todos");
   var [expandEmp, setExpandEmp] = useState(null);
+  var [editing, setEditing] = useState({});
   function getROLocal(id) {
     return getRO(rates, id);
   }
-  function setField(id, field, v) {
+  function onEdit(id, field, v) {
+    setEditing(p => Object.assign({}, p, {
+      [id + "." + field]: v
+    }));
+  }
+  function onCommit(id, field, v) {
     var n = parseFloat(String(v).replace(",", "."));
-    if (isNaN(n)) return;
+    if (isNaN(n) || n < 0) n = 0;
+    setEditing(p => {
+      var np = Object.assign({}, p);
+      delete np[id + "." + field];
+      return np;
+    });
     setRates(p => {
       var c = Object.assign({}, p[id] || {});
       c[field] = n;
@@ -6347,6 +6358,10 @@ function TabCustos({
         [id]: c
       });
     });
+  }
+  function dv(id, field, saved) {
+    var k = id + "." + field;
+    return k in editing ? editing[k] : saved || "";
   }
   function getSessoes(empId) {
     var evs = filterEv === "todos" ? events : events.filter(e => e.id === filterEv);
@@ -6686,9 +6701,10 @@ function TabCustos({
       type: "number",
       min: "0",
       step: "10",
-      value: x.val || "",
+      value: dv(emp.id, x.field, x.val),
       placeholder: "0",
-      onChange: e => setField(emp.id, x.field, e.target.value),
+      onChange: e => onEdit(emp.id, x.field, e.target.value),
+      onBlur: e => onCommit(emp.id, x.field, e.target.value),
       style: {
         flex: 1,
         background: "transparent",
@@ -6760,9 +6776,10 @@ function TabCustos({
       type: "number",
       min: "0",
       step: "5",
-      value: ro.horaExtra || "",
+      value: dv(emp.id, "horaExtra", ro.horaExtra),
       placeholder: "0",
-      onChange: e => setField(emp.id, "horaExtra", e.target.value),
+      onChange: e => onEdit(emp.id, "horaExtra", e.target.value),
+      onBlur: e => onCommit(emp.id, "horaExtra", e.target.value),
       style: {
         width: 55,
         background: "transparent",
