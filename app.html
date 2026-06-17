@@ -10,22 +10,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260617135925"/>
+<meta name="build" content="20260617163849"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;}
+*{box-sizing:border-box;margin:0;padding:0;}html,body{height:100%;}
 body{background:#10152E;font-family:'Barlow',sans-serif;color:#E8ECF8;overscroll-behavior-y:contain;-webkit-text-size-adjust:100%;}
 button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;font-family:inherit;}
 button:active{opacity:.82;transform:scale(.96);}
-input,select{font-family:inherit;}
-select option{background:#1F2755;}
+input,select{font-family:inherit;}select option{background:#1F2755;}
 input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.5)sepia(1)hue-rotate(190deg)brightness(1.2);}
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;}
-::-webkit-scrollbar{width:4px;}
-::-webkit-scrollbar-track{background:#10152E;}
-::-webkit-scrollbar-thumb{background:#323D7A;border-radius:4px;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#10152E;}::-webkit-scrollbar-thumb{background:#323D7A;border-radius:4px;}
 @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
 #root{min-height:100%;background:#10152E;}
@@ -1902,13 +1898,7 @@ function App() {
     if (ready) sbSync("berg_groups", groups);
   }, [groups, ready]);
   useEffect(() => {
-    if (!ready) return;
-    var t = setTimeout(function () {
-      sbSync("berg_rates", rates);
-    }, 800);
-    return function () {
-      clearTimeout(t);
-    };
+    if (ready) sbSync("berg_rates", rates);
   }, [rates, ready]);
   useEffect(() => {
     if (ready) sbSync("berg_payments", payments);
@@ -6332,6 +6322,19 @@ function TabCustos({
       };
     });
   }
+  function saveField(id, field, v) {
+    var n = parseFloat(String(v).replace(",", "."));
+    var cur = {
+      ...getROLocal(id)
+    };
+    cur[field] = isNaN(n) ? 0 : n;
+    var newRates = {
+      ...rates,
+      [id]: cur
+    };
+    setRates(newRates);
+    sbSync("berg_rates", newRates);
+  }
   function getSessoes(empId) {
     var evs = filterEv === "todos" ? events : events.filter(e => e.id === filterEv);
     var out = [];
@@ -6673,6 +6676,7 @@ function TabCustos({
       value: x.val || "",
       placeholder: "0",
       onChange: e => setField(emp.id, x.field, e.target.value),
+      onBlur: e => saveField(emp.id, x.field, e.target.value),
       style: {
         flex: 1,
         background: "transparent",
@@ -6747,6 +6751,7 @@ function TabCustos({
       value: ro.horaExtra || "",
       placeholder: "0",
       onChange: e => setField(emp.id, "horaExtra", e.target.value),
+      onBlur: e => saveField(emp.id, "horaExtra", e.target.value),
       style: {
         width: 55,
         background: "transparent",
