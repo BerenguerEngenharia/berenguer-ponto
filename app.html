@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260617184216"/>
+<meta name="build" content="20260617185033"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
@@ -6324,6 +6324,52 @@ function RelHistorico({
 }
 
 // ── TabCustos ─────────────────────────────────────────────────────────────────
+// Input numérico não-controlado — o React nunca interfere no valor enquanto digita
+function NumInput({
+  savedVal,
+  onSave,
+  color,
+  step,
+  style
+}) {
+  var ref = useRef(null);
+  // Sincroniza o valor exibido quando savedVal muda EXTERNAMENTE
+  // (ex: carregamento do Supabase), mas NUNCA enquanto o campo está em foco
+  useEffect(() => {
+    if (ref.current && document.activeElement !== ref.current) {
+      ref.current.value = savedVal || "";
+    }
+  }, [savedVal]);
+  function handleBlur(e) {
+    var n = parseFloat(String(e.target.value).replace(",", "."));
+    if (isNaN(n) || n < 0) n = 0;
+    e.target.value = n || "";
+    onSave(n);
+  }
+  function handleKeyDown(e) {
+    if (e.key === "Enter") e.target.blur();
+  }
+  return /*#__PURE__*/React.createElement("input", {
+    ref: ref,
+    type: "number",
+    min: "0",
+    step: step || "1",
+    defaultValue: savedVal || "",
+    placeholder: "0",
+    onBlur: handleBlur,
+    onKeyDown: handleKeyDown,
+    style: Object.assign({
+      background: "transparent",
+      border: "none",
+      padding: 0,
+      fontSize: 13,
+      fontWeight: 800,
+      fontFamily: "inherit",
+      outline: "none",
+      textAlign: "right"
+    }, style)
+  });
+}
 function TabCustos({
   team,
   events,
@@ -6334,23 +6380,10 @@ function TabCustos({
 }) {
   var [filterEv, setFilterEv] = useState("todos");
   var [expandEmp, setExpandEmp] = useState(null);
-  var [editing, setEditing] = useState({});
   function getROLocal(id) {
     return getRO(rates, id);
   }
-  function onEdit(id, field, v) {
-    setEditing(p => Object.assign({}, p, {
-      [id + "." + field]: v
-    }));
-  }
-  function onCommit(id, field, v) {
-    var n = parseFloat(String(v).replace(",", "."));
-    if (isNaN(n) || n < 0) n = 0;
-    setEditing(p => {
-      var np = Object.assign({}, p);
-      delete np[id + "." + field];
-      return np;
-    });
+  function saveField(id, field, n) {
     setRates(p => {
       var c = Object.assign({}, p[id] || {});
       c[field] = n;
@@ -6358,10 +6391,6 @@ function TabCustos({
         [id]: c
       });
     });
-  }
-  function dv(id, field, saved) {
-    var k = id + "." + field;
-    return k in editing ? editing[k] : saved || "";
   }
   function getSessoes(empId) {
     var evs = filterEv === "todos" ? events : events.filter(e => e.id === filterEv);
@@ -6697,25 +6726,14 @@ function TabCustos({
         color: B.dimmer,
         marginRight: 3
       }
-    }, "R$"), /*#__PURE__*/React.createElement("input", {
-      type: "number",
-      min: "0",
+    }, "R$"), /*#__PURE__*/React.createElement(NumInput, {
+      savedVal: x.val,
+      onSave: n => saveField(emp.id, x.field, n),
       step: "10",
-      value: dv(emp.id, x.field, x.val),
-      placeholder: "0",
-      onChange: e => onEdit(emp.id, x.field, e.target.value),
-      onBlur: e => onCommit(emp.id, x.field, e.target.value),
+      color: x.val > 0 ? x.color : B.muted,
       style: {
         flex: 1,
-        background: "transparent",
-        border: "none",
         color: x.val > 0 ? x.color : B.muted,
-        padding: 0,
-        fontSize: 13,
-        fontWeight: 800,
-        fontFamily: "inherit",
-        outline: "none",
-        textAlign: "right",
         minWidth: 0,
         width: "100%"
       }
@@ -6772,25 +6790,13 @@ function TabCustos({
         color: B.dimmer,
         marginRight: 3
       }
-    }, "R$"), /*#__PURE__*/React.createElement("input", {
-      type: "number",
-      min: "0",
+    }, "R$"), /*#__PURE__*/React.createElement(NumInput, {
+      savedVal: ro.horaExtra,
+      onSave: n => saveField(emp.id, "horaExtra", n),
       step: "5",
-      value: dv(emp.id, "horaExtra", ro.horaExtra),
-      placeholder: "0",
-      onChange: e => onEdit(emp.id, "horaExtra", e.target.value),
-      onBlur: e => onCommit(emp.id, "horaExtra", e.target.value),
       style: {
         width: 55,
-        background: "transparent",
-        border: "none",
-        color: ro.horaExtra > 0 ? B.orange : B.muted,
-        padding: 0,
-        fontSize: 13,
-        fontWeight: 800,
-        fontFamily: "inherit",
-        outline: "none",
-        textAlign: "right"
+        color: ro.horaExtra > 0 ? B.orange : B.muted
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
