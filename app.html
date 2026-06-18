@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260618232209"/>
+<meta name="build" content="20260618233647"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
@@ -2376,15 +2376,15 @@ function TabOrcamento({
   var [local, setLocal] = useState("");
   var [cliente, setCliente] = useState("");
   var [margem, setMargem] = useState(0);
-  var [dias, setDias] = useState([{
+  // Cada turno tem: dataIni + horaIni (início) e dataFim + horaFim (término)
+  var [turnos, setTurnos] = useState([{
     id: uid(),
-    data: "",
-    entrada: "08:00",
-    saida: "17:00"
+    dataIni: "",
+    horaIni: "08:00",
+    dataFim: "",
+    horaFim: "17:00"
   }]);
   var [selecionados, setSel] = useState({});
-
-  // ── helpers ──
   function getRO(id) {
     return rates[id] || {
       totalDia: 0,
@@ -2393,33 +2393,25 @@ function TabOrcamento({
       horaExtra: 0
     };
   }
-  function calcDia(diaDef, ro) {
-    if (!diaDef.data || !diaDef.entrada || !diaDef.saida) return null;
-    if (diaDef.entrada === diaDef.saida) return null; // entrada = saída → inválido
-    var checkIn = diaDef.data + "T" + diaDef.entrada + ":00";
-    var checkOut = diaDef.data + "T" + diaDef.saida + ":00";
-    // Se saída < entrada → passa da meia noite (ex: 08:00→02:00)
-    if (diaDef.saida < diaDef.entrada) {
-      var d = new Date(diaDef.data + "T" + diaDef.saida + ":00");
-      d.setDate(d.getDate() + 1);
-      checkOut = d.toISOString().slice(0, 19);
-    }
+  function calcTurno(t, ro) {
+    if (!t.dataIni || !t.horaIni || !t.dataFim || !t.horaFim) return null;
+    var checkIn = t.dataIni + "T" + t.horaIni + ":00";
+    var checkOut = t.dataFim + "T" + t.horaFim + ":00";
+    var ini = new Date(checkIn),
+      fim = new Date(checkOut);
+    if (fim <= ini) return null; // término antes do início → inválido
     return calcSessao(checkIn, checkOut, ro);
   }
   var empSelecionados = team.filter(e => selecionados[e.id]);
-  var diasValidos = dias.filter(d => d.data && d.entrada && d.saida);
-
-  // Cálculo geral
+  var turnosValidos = turnos.filter(t => t.dataIni && t.horaIni && t.dataFim && t.horaFim);
   var totalBruto = 0;
   var linhas = empSelecionados.map(emp => {
     var ro = getRO(emp.id);
-    var sessoes = diasValidos.map(d => ({
-      dia: d,
-      calc: calcDia(d, ro)
+    var sessoes = turnosValidos.map(t => ({
+      t,
+      calc: calcTurno(t, ro)
     })).filter(x => x.calc);
-    var subtotal = sessoes.reduce(function (a, x) {
-      return a + (x.calc ? x.calc.total : 0);
-    }, 0);
+    var subtotal = parseFloat(sessoes.reduce((a, x) => a + x.calc.total, 0).toFixed(2));
     totalBruto += subtotal;
     return {
       emp,
@@ -2430,8 +2422,20 @@ function TabOrcamento({
   });
   var valorMargem = parseFloat((totalBruto * (margem / 100)).toFixed(2));
   var totalFinal = parseFloat((totalBruto + valorMargem).toFixed(2));
-
-  // ── Copiar TXT ──
+  var DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  function fmtTurno(t) {
+    var dIni = t.dataIni ? new Date(t.dataIni + "T12:00") : null;
+    var dFim = t.dataFim ? new Date(t.dataFim + "T12:00") : null;
+    var sIni = dIni ? DIAS_SEMANA[dIni.getDay()] + " " + dIni.toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit"
+    }) : "";
+    var sFim = dFim ? DIAS_SEMANA[dFim.getDay()] + " " + dFim.toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit"
+    }) : "";
+    return sIni + " " + t.horaIni + " → " + sFim + " " + t.horaFim;
+  }
   function copiarTxt() {
     var sep = "─".repeat(40);
     var lines = ["BERENGUER ELÉTRICA", "ORÇAMENTO DE SERVIÇOS", sep];
@@ -2439,76 +2443,56 @@ function TabOrcamento({
     if (local) lines.push("Local:   " + local);
     if (cliente) lines.push("Cliente: " + cliente);
     lines.push("Emitido: " + new Date().toLocaleDateString("pt-BR"), sep);
-    lines.push("DIAS DE SERVIÇO:");
-    diasValidos.forEach(function (d) {
-      lines.push("  " + new Date(d.data + "T12:00").toLocaleDateString("pt-BR", {
-        weekday: "short",
-        day: "2-digit",
-        month: "2-digit"
-      }) + " · " + d.entrada + " → " + d.saida);
+    lines.push("TURNOS DE SERVIÇO:");
+    turnosValidos.forEach(t => {
+      lines.push("  " + fmtTurno(t));
     });
     lines.push(sep, "EQUIPE E VALORES:");
-    linhas.forEach(function (l) {
+    linhas.forEach(l => {
       lines.push("", "► " + l.emp.name + " (" + l.emp.role + ")");
-      l.sessoes.forEach(function (x) {
+      l.sessoes.forEach(x => {
         var c = x.calc,
-          d = x.dia;
-        var dtStr = new Date(d.data + "T12:00").toLocaleDateString("pt-BR", {
-          weekday: "short",
-          day: "2-digit",
-          month: "2-digit"
-        });
-        lines.push("  " + dtStr + " " + d.entrada + "–" + d.saida + (c.isSab ? " [SAB]" : c.isDom ? " [DOM]" : ""));
+          t = x.t;
+        lines.push("  " + fmtTurno(t));
         if (c.diarias > 0) lines.push("    " + c.diarias + "× Diária (" + fmtBRL(c.vUnit) + "): " + fmtBRL(c.vDiarias));
+        if (c.meiasDiarias > 0) lines.push("    " + c.meiasDiarias + "× Meia Diária: " + fmtBRL(c.vUnit / 2));
         if (c.extraH > 0) lines.push("    " + c.extraH.toFixed(1) + "h extra (" + fmtBRL(c.vHE) + "/h): " + fmtBRL(c.vExtras));
         if (c.vJanta > 0) lines.push("    Janta: " + fmtBRL(c.vJanta));
       });
       lines.push("  SUBTOTAL: " + fmtBRL(l.subtotal));
     });
     lines.push(sep, "CUSTO BASE: " + fmtBRL(totalBruto));
-    if (margem > 0) lines.push("MARGEM " + margem + "%: +" + fmtBRL(valorMargem), "TOTAL FINAL: " + fmtBRL(totalFinal));else lines.push("TOTAL: " + fmtBRL(totalFinal));
-    lines.push(sep, "Berenguer Elétrica · berenguerengenharia.github.io");
-    navigator.clipboard.writeText(lines.join("\n")).then(function () {
-      showToast("Copiado!");
-    });
+    if (margem > 0) {
+      lines.push("MARGEM " + margem + "%: +" + fmtBRL(valorMargem), "TOTAL FINAL: " + fmtBRL(totalFinal));
+    } else lines.push("TOTAL: " + fmtBRL(totalFinal));
+    lines.push(sep, "Berenguer Elétrica");
+    navigator.clipboard.writeText(lines.join("\n")).then(() => showToast("Copiado!"));
   }
-
-  // ── Gerar PDF (impressão) ──
   function gerarPDF() {
-    var DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-    var rowsBg = ["#f9f9f9", "#ffffff"];
-    var linhasHTML = linhas.map(function (l, li) {
-      var sessoesHTML = l.sessoes.map(function (x, si) {
+    var linhasHTML = linhas.map(l => {
+      var sessoesHTML = l.sessoes.map(x => {
         var c = x.calc,
-          d = x.dia;
-        var dt = new Date(d.data + "T12:00");
-        var dtStr = DIAS_SEMANA[dt.getDay()] + " " + dt.toLocaleDateString("pt-BR");
+          t = x.t;
         var badge = c.isSab ? "<span class='badge sab'>SAB</span>" : c.isDom ? "<span class='badge dom'>DOM</span>" : "";
         var detalhe = [];
         if (c.diarias > 0) detalhe.push(c.diarias + "× Diária (" + fmtBRL(c.vUnit) + "): <b>" + fmtBRL(c.vDiarias) + "</b>");
+        if (c.meiasDiarias > 0) detalhe.push(c.meiasDiarias + "× Meia Diária: <b>" + fmtBRL(c.vUnit / 2) + "</b>");
         if (c.extraH > 0) detalhe.push(c.extraH.toFixed(1) + "h extra (" + fmtBRL(c.vHE) + "/h): <b>" + fmtBRL(c.vExtras) + "</b>");
         if (c.vJanta > 0) detalhe.push("Janta: <b>" + fmtBRL(c.vJanta) + "</b>");
-        return "<tr style='background:" + rowsBg[si % 2] + "'>" + "<td>" + dtStr + " " + badge + "<br/><small>" + d.entrada + " → " + d.saida + "</small></td>" + "<td>" + detalhe.join("<br/>") + "</td>" + "<td style='text-align:right;font-weight:700;'>" + fmtBRL(c.total) + "</td>" + "</tr>";
+        return "<tr style='background:#f9f9f9'>" + "<td>" + fmtTurno(t) + " " + badge + "</td>" + "<td>" + detalhe.join("<br/>") + "</td>" + "<td style='text-align:right;font-weight:700'>" + fmtBRL(c.total) + "</td></tr>";
       }).join("");
-      return "<tr style='background:#10152E;color:#F5C518;'><td colspan='3' style='padding:8px 12px;font-weight:900;font-size:13px;'>" + "⚡ " + l.emp.name + " <span style='font-weight:400;font-size:11px;color:#6B7BB5;'>(" + l.emp.role + ")</span>" + "</td></tr>" + sessoesHTML + "<tr style='background:#e8f4e8;'><td colspan='2' style='font-weight:700;'>Subtotal " + l.emp.name.split(" ")[0] + "</td>" + "<td style='text-align:right;font-weight:900;color:#166534;'>" + fmtBRL(l.subtotal) + "</td></tr>";
+      return "<tr style='background:#10152E;color:#F5C518'><td colspan='3' style='padding:8px 12px;font-weight:900;font-size:13px'>⚡ " + l.emp.name + " <span style='font-weight:400;font-size:11px;color:#6B7BB5'>(" + l.emp.role + ")</span></td></tr>" + sessoesHTML + "<tr style='background:#e8f4e8'><td colspan='2' style='font-weight:700'>Subtotal " + l.emp.name.split(" ")[0] + "</td>" + "<td style='text-align:right;font-weight:900;color:#166534'>" + fmtBRL(l.subtotal) + "</td></tr>";
     }).join("");
-    var totalHTML = "<tr style='background:#10152E;'><td colspan='2' style='font-weight:900;font-size:14px;color:#F5C518;'>CUSTO BASE</td>" + "<td style='text-align:right;font-weight:900;font-size:16px;color:#F5C518;'>" + fmtBRL(totalBruto) + "</td></tr>";
+    var totalHTML = "<tr style='background:#10152E'><td colspan='2' style='font-weight:900;font-size:14px;color:#F5C518'>CUSTO BASE</td>" + "<td style='text-align:right;font-weight:900;font-size:16px;color:#F5C518'>" + fmtBRL(totalBruto) + "</td></tr>";
     if (margem > 0) {
-      totalHTML += "<tr style='background:#1B2147;'><td colspan='2' style='color:#ccc;font-size:12px;'>Margem de segurança (" + margem + "%)</td>" + "<td style='text-align:right;color:#F59E0B;font-weight:700;'>+" + fmtBRL(valorMargem) + "</td></tr>" + "<tr style='background:#0f4a0f;'><td colspan='2' style='font-weight:900;font-size:15px;color:#22C55E;'>TOTAL FINAL</td>" + "<td style='text-align:right;font-weight:900;font-size:20px;color:#22C55E;'>" + fmtBRL(totalFinal) + "</td></tr>";
+      totalHTML += "<tr style='background:#1B2147'><td colspan='2' style='color:#ccc;font-size:12px'>Margem (" + margem + "%)</td>" + "<td style='text-align:right;color:#F59E0B;font-weight:700'>+" + fmtBRL(valorMargem) + "</td></tr>" + "<tr style='background:#0f4a0f'><td colspan='2' style='font-weight:900;font-size:15px;color:#22C55E'>TOTAL FINAL</td>" + "<td style='text-align:right;font-weight:900;font-size:20px;color:#22C55E'>" + fmtBRL(totalFinal) + "</td></tr>";
     }
-    var diasListaHTML = diasValidos.map(function (d) {
-      var dt = new Date(d.data + "T12:00");
-      return "<span class='dia-badge'>" + DIAS_SEMANA[dt.getDay()] + " " + dt.toLocaleDateString("pt-BR") + " · " + d.entrada + " → " + d.saida + "</span>";
-    }).join(" ");
+    var turnosListaHTML = turnosValidos.map(t => "<span class='dia-badge'>" + fmtTurno(t) + "</span>").join(" ");
     var win = window.open("", "_blank");
-    win.document.write("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'/><title>Orçamento — " + nomeEv + "</title><style>" + "*{box-sizing:border-box;margin:0;padding:0;}" + "body{font-family:Arial,sans-serif;color:#1a1a1a;font-size:13px;}" + ".header{background:#10152E;color:#fff;padding:24px 32px;display:flex;align-items:center;gap:20px;}" + ".header svg{flex-shrink:0;}" + ".header-info{flex:1;}" + ".header-info h1{font-size:22px;font-weight:900;color:#F5C518;letter-spacing:2px;}" + ".header-info p{font-size:11px;color:#6B7BB5;margin-top:2px;}" + ".meta{background:#1B2147;color:#fff;padding:16px 32px;display:flex;gap:32px;flex-wrap:wrap;}" + ".meta-item{display:flex;flex-direction:column;gap:2px;}" + ".meta-label{font-size:9px;color:#6B7BB5;text-transform:uppercase;letter-spacing:1px;}" + ".meta-value{font-size:13px;font-weight:700;}" + ".dias-wrap{background:#f0f4ff;padding:12px 32px;border-bottom:1px solid #ddd;}" + ".dias-title{font-size:10px;font-weight:700;color:#3A4580;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;}" + ".dia-badge{display:inline-block;background:#10152E;color:#F5C518;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;margin:2px;}" + ".table-wrap{padding:24px 32px;}" + "table{width:100%;border-collapse:collapse;}" + "th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;}" + "td{padding:7px 12px;border-bottom:1px solid #eee;font-size:12px;}" + ".badge{font-size:9px;font-weight:900;padding:1px 5px;border-radius:4px;margin-left:4px;}" + ".badge.sab{background:#F5C518;color:#1B2147;}.badge.dom{background:#22C55E;color:#fff;}" + ".footer{background:#f9f9f9;border-top:2px solid #10152E;padding:12px 32px;display:flex;justify-content:space-between;align-items:center;}" + ".footer-brand{font-size:11px;color:#6B7BB5;}" + ".footer-date{font-size:11px;color:#6B7BB5;}" + "@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}" + "</style></head><body>" + "<div class='header'>" + "<svg width='48' height='48' viewBox='0 0 44 44' fill='none'>" + "<path d='M22 2 L40 12 L40 32 L22 42 L4 32 L4 12 Z' fill='#1B2147' stroke='#F5C518' stroke-width='1.8'/>" + "<path d='M26 9 L16 23 L22 23 L18 35 L28 19 L22 19 Z' fill='#F5C518'/>" + "</svg>" + "<div class='header-info'>" + "<h1>BERENGUER ELÉTRICA</h1>" + "<p>Orçamento de Serviços Elétricos</p>" + "</div>" + "</div>" + "<div class='meta'>" + (nomeEv ? "<div class='meta-item'><span class='meta-label'>Evento</span><span class='meta-value'>" + nomeEv + "</span></div>" : "") + (local ? "<div class='meta-item'><span class='meta-label'>Local</span><span class='meta-value'>" + local + "</span></div>" : "") + (cliente ? "<div class='meta-item'><span class='meta-label'>Cliente</span><span class='meta-value'>" + cliente + "</span></div>" : "") + "<div class='meta-item'><span class='meta-label'>Emitido em</span><span class='meta-value'>" + new Date().toLocaleDateString("pt-BR") + "</span></div>" + "<div class='meta-item'><span class='meta-label'>Equipe</span><span class='meta-value'>" + empSelecionados.length + " funcionário(s)</span></div>" + "</div>" + "<div class='dias-wrap'>" + "<div class='dias-title'>Dias de Serviço (" + diasValidos.length + ")</div>" + diasListaHTML + "</div>" + "<div class='table-wrap'>" + "<table><thead><tr><th>Data / Horário</th><th>Detalhamento</th><th style='text-align:right'>Valor</th></tr></thead>" + "<tbody>" + linhasHTML + totalHTML + "</tbody></table>" + "</div>" + "<div class='footer'>" + "<span class='footer-brand'>Berenguer Elétrica · berenguerengenharia.github.io</span>" + "<span class='footer-date'>" + new Date().toLocaleString("pt-BR") + "</span>" + "</div>" + "</body></html>");
+    win.document.write("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'/><title>Orçamento — " + nomeEv + "</title><style>" + "*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;color:#1a1a1a;font-size:13px;}" + ".header{background:#10152E;color:#fff;padding:24px 32px;display:flex;align-items:center;gap:20px;}" + ".header svg{flex-shrink:0;}.header-info{flex:1;}.header-info h1{font-size:22px;font-weight:900;color:#F5C518;letter-spacing:2px;}" + ".header-info p{font-size:11px;color:#6B7BB5;margin-top:2px;}" + ".meta{background:#1B2147;color:#fff;padding:16px 32px;display:flex;gap:32px;flex-wrap:wrap;}" + ".meta-item{display:flex;flex-direction:column;gap:2px;}.meta-label{font-size:9px;color:#6B7BB5;text-transform:uppercase;letter-spacing:1px;}.meta-value{font-size:13px;font-weight:700;}" + ".dias-wrap{background:#f0f4ff;padding:12px 32px;border-bottom:1px solid #ddd;}" + ".dias-title{font-size:10px;font-weight:700;color:#3A4580;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;}" + ".dia-badge{display:inline-block;background:#10152E;color:#F5C518;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;margin:2px;}" + ".table-wrap{padding:24px 32px;}table{width:100%;border-collapse:collapse;}" + "th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;}" + "td{padding:7px 12px;border-bottom:1px solid #eee;font-size:12px;}" + ".badge{font-size:9px;font-weight:900;padding:1px 5px;border-radius:4px;margin-left:4px;}" + ".badge.sab{background:#F5C518;color:#1B2147;}.badge.dom{background:#22C55E;color:#fff;}" + ".footer{background:#f9f9f9;border-top:2px solid #10152E;padding:12px 32px;display:flex;justify-content:space-between;align-items:center;}" + ".footer-brand{font-size:11px;color:#6B7BB5;}.footer-date{font-size:11px;color:#6B7BB5;}" + "@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}" + "</style></head><body>" + "<div class='header'><svg width='48' height='48' viewBox='0 0 44 44' fill='none'><path d='M22 2 L40 12 L40 32 L22 42 L4 32 L4 12 Z' fill='#1B2147' stroke='#F5C518' stroke-width='1.8'/><path d='M26 9 L16 23 L22 23 L18 35 L28 19 L22 19 Z' fill='#F5C518'/></svg>" + "<div class='header-info'><h1>BERENGUER ELÉTRICA</h1><p>Orçamento de Serviços Elétricos</p></div></div>" + "<div class='meta'>" + (nomeEv ? "<div class='meta-item'><span class='meta-label'>Evento</span><span class='meta-value'>" + nomeEv + "</span></div>" : "") + (local ? "<div class='meta-item'><span class='meta-label'>Local</span><span class='meta-value'>" + local + "</span></div>" : "") + (cliente ? "<div class='meta-item'><span class='meta-label'>Cliente</span><span class='meta-value'>" + cliente + "</span></div>" : "") + "<div class='meta-item'><span class='meta-label'>Emitido em</span><span class='meta-value'>" + new Date().toLocaleDateString("pt-BR") + "</span></div>" + "<div class='meta-item'><span class='meta-label'>Equipe</span><span class='meta-value'>" + empSelecionados.length + " funcionário(s)</span></div>" + "</div>" + "<div class='dias-wrap'><div class='dias-title'>Turnos de Serviço (" + turnosValidos.length + ")</div>" + turnosListaHTML + "</div>" + "<div class='table-wrap'><table><thead><tr><th>Turno</th><th>Detalhamento</th><th style='text-align:right'>Valor</th></tr></thead>" + "<tbody>" + linhasHTML + totalHTML + "</tbody></table></div>" + "<div class='footer'><span class='footer-brand'>Berenguer Elétrica</span><span class='footer-date'>" + new Date().toLocaleString("pt-BR") + "</span></div>" + "</body></html>");
     win.document.close();
-    setTimeout(function () {
-      win.print();
-    }, 600);
+    setTimeout(() => win.print(), 600);
   }
-
-  // ── Render ──
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2633,7 +2617,7 @@ function TabOrcamento({
       fontSize: 12,
       color: B.muted
     }
-  }, "% acrescido sobre o custo total")))), /*#__PURE__*/React.createElement("div", {
+  }, "% sobre o custo total")))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: B.navyMid,
       border: "1px solid " + B.navyBorder,
@@ -2656,91 +2640,160 @@ function TabOrcamento({
       textTransform: "uppercase",
       letterSpacing: 1
     }
-  }, "Dias de Servi\xE7o"), /*#__PURE__*/React.createElement("button", {
+  }, "Turnos de Servi\xE7o"), /*#__PURE__*/React.createElement("button", {
     style: {
       ...S.btnBolt,
       padding: "5px 12px",
       fontSize: 11
     },
-    onClick: () => setDias(p => [...p, {
+    onClick: () => setTurnos(p => [...p, {
       id: uid(),
-      data: "",
-      entrada: "08:00",
-      saida: "17:00"
+      dataIni: "",
+      horaIni: "08:00",
+      dataFim: "",
+      horaFim: "17:00"
     }])
-  }, "+ Dia")), /*#__PURE__*/React.createElement("div", {
+  }, "+ Turno")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
-      gap: 8
+      gap: 10
     }
-  }, dias.map((d, i) => /*#__PURE__*/React.createElement("div", {
-    key: d.id,
+  }, turnos.map((t, i) => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
     style: {
-      display: "flex",
-      gap: 8,
-      alignItems: "center",
       background: B.navyDark,
-      borderRadius: 9,
-      padding: "8px 10px"
+      borderRadius: 10,
+      padding: "10px 12px",
+      border: "1px solid " + B.navyBorder
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
-      fontWeight: 700,
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
       color: B.dimmer,
       width: 20,
       textAlign: "center",
       flexShrink: 0
     }
-  }, i + 1), /*#__PURE__*/React.createElement("input", {
+  }, "#", i + 1), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: B.muted,
+      flex: 1
+    }
+  }, "Turno ", i + 1), turnos.length > 1 && /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...S.btnDanger,
+      padding: "3px 8px",
+      fontSize: 11
+    },
+    onClick: () => setTurnos(p => p.filter(x => x.id !== t.id))
+  }, "\u2715")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 8,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 9,
+      fontWeight: 700,
+      color: B.green,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 3
+    }
+  }, "\u25B6 In\xEDcio \u2014 Data"), /*#__PURE__*/React.createElement("input", {
     type: "date",
     className: "input-field",
     style: {
-      flex: 2
+      fontSize: 12
     },
-    value: d.data,
-    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
+    value: t.dataIni,
+    onChange: e => setTurnos(p => p.map(x => x.id === t.id ? {
       ...x,
-      data: e.target.value
+      dataIni: e.target.value
     } : x))
-  }), /*#__PURE__*/React.createElement("input", {
-    type: "time",
-    className: "input-field",
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: {
-      flex: 1
-    },
-    value: d.entrada,
-    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
-      ...x,
-      entrada: e.target.value
-    } : x))
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: B.dimmer,
-      flexShrink: 0
+      fontSize: 9,
+      fontWeight: 700,
+      color: B.green,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 3
     }
-  }, "\u2192"), /*#__PURE__*/React.createElement("input", {
+  }, "\u25B6 In\xEDcio \u2014 Hora"), /*#__PURE__*/React.createElement("input", {
     type: "time",
     className: "input-field",
     style: {
-      flex: 1
+      fontSize: 12
     },
-    value: d.saida,
-    onChange: e => setDias(p => p.map(x => x.id === d.id ? {
+    value: t.horaIni,
+    onChange: e => setTurnos(p => p.map(x => x.id === t.id ? {
       ...x,
-      saida: e.target.value
+      horaIni: e.target.value
     } : x))
-  }), dias.length > 1 && /*#__PURE__*/React.createElement("button", {
+  }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      ...S.btnDanger,
-      padding: "4px 8px",
-      fontSize: 12,
-      flexShrink: 0
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 9,
+      fontWeight: 700,
+      color: B.red,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 3
+    }
+  }, "\u25A0 T\xE9rmino \u2014 Data"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    className: "input-field",
+    style: {
+      fontSize: 12
     },
-    onClick: () => setDias(p => p.filter(x => x.id !== d.id))
-  }, "\u2715"))))), /*#__PURE__*/React.createElement("div", {
+    value: t.dataFim,
+    onChange: e => setTurnos(p => p.map(x => x.id === t.id ? {
+      ...x,
+      dataFim: e.target.value
+    } : x))
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 9,
+      fontWeight: 700,
+      color: B.red,
+      textTransform: "uppercase",
+      letterSpacing: .5,
+      display: "block",
+      marginBottom: 3
+    }
+  }, "\u25A0 T\xE9rmino \u2014 Hora"), /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    className: "input-field",
+    style: {
+      fontSize: 12
+    },
+    value: t.horaFim,
+    onChange: e => setTurnos(p => p.map(x => x.id === t.id ? {
+      ...x,
+      horaFim: e.target.value
+    } : x))
+  }))))))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: B.navyMid,
       border: "1px solid " + B.navyBorder,
@@ -2872,7 +2925,7 @@ function TabOrcamento({
         }
       }, ro.totalDia > 0 ? fmtBRL(ro.totalDia) + "/dia" : "sem valor")));
     })));
-  })), empSelecionados.length > 0 && diasValidos.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  })), empSelecionados.length > 0 && turnosValidos.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       fontWeight: 800,
@@ -2916,13 +2969,12 @@ function TabOrcamento({
     style: {
       fontSize: 14,
       fontWeight: 900,
-      color: B.green
+      color: B.green,
+      fontVariantNumeric: "tabular-nums"
     }
   }, fmtBRL(l.subtotal))), l.sessoes.map((x, i) => {
     var c = x.calc,
-      d = x.dia;
-    var dt = new Date(d.data + "T12:00");
-    var DIASN = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+      t = x.t;
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
@@ -2944,7 +2996,7 @@ function TabOrcamento({
         fontWeight: 700,
         color: B.text
       }
-    }, DIASN[dt.getDay()], " ", dt.toLocaleDateString("pt-BR"), " \xB7 ", d.entrada, " \u2192 ", d.saida, c.isSab && /*#__PURE__*/React.createElement("span", {
+    }, fmtTurno(t), c.isSab && /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 6,
         fontSize: 9,
@@ -2968,7 +3020,8 @@ function TabOrcamento({
       style: {
         fontSize: 12,
         fontWeight: 800,
-        color: B.green
+        color: B.green,
+        fontVariantNumeric: "tabular-nums"
       }
     }, fmtBRL(c.total))), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2985,7 +3038,16 @@ function TabOrcamento({
       style: {
         color: "#6366f1"
       }
-    }, fmtBRL(c.vDiarias))), c.extraH > 0 && /*#__PURE__*/React.createElement("span", {
+    }, fmtBRL(c.vDiarias))), c.meiasDiarias > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: B.muted
+      }
+    }, "\xBD di\xE1ria: ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: "#6366f1"
+      }
+    }, fmtBRL(c.vUnit / 2))), c.extraH > 0 && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         color: B.muted
@@ -3031,7 +3093,8 @@ function TabOrcamento({
     style: {
       fontSize: 22,
       fontWeight: 900,
-      color: B.green
+      color: B.green,
+      fontVariantNumeric: "tabular-nums"
     }
   }, fmtBRL(totalBruto))), margem > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3051,7 +3114,8 @@ function TabOrcamento({
     style: {
       fontSize: 14,
       fontWeight: 700,
-      color: B.orange
+      color: B.orange,
+      fontVariantNumeric: "tabular-nums"
     }
   }, "+", fmtBRL(valorMargem))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3071,7 +3135,8 @@ function TabOrcamento({
     style: {
       fontSize: 28,
       fontWeight: 900,
-      color: B.white
+      color: B.white,
+      fontVariantNumeric: "tabular-nums"
     }
   }, fmtBRL(totalFinal))))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3097,21 +3162,21 @@ function TabOrcamento({
       fontSize: 13
     },
     onClick: gerarPDF
-  }, "\uD83D\uDDA8\uFE0F Gerar PDF"))), empSelecionados.length === 0 && diasValidos.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDDA8\uFE0F Gerar PDF"))), empSelecionados.length === 0 && turnosValidos.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "24px 0",
       color: B.muted,
       fontSize: 13
     }
-  }, "Selecione ao menos um funcion\xE1rio para calcular."), diasValidos.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Selecione ao menos um funcion\xE1rio."), turnosValidos.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "24px 0",
       color: B.muted,
       fontSize: 13
     }
-  }, "Preencha ao menos um dia de servi\xE7o para calcular."));
+  }, "Preencha ao menos um turno para calcular."));
 }
 
 // ── TabEventos ────────────────────────────────────────────────────────────────
