@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#1B2147"/>
-<meta name="build" content="20260617185033"/>
+<meta name="build" content="20260618232209"/>
 <title>Berenguer — Controle de Ponto</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <style>
@@ -1194,7 +1194,7 @@ function calcSessao(checkIn, checkOut, ro) {
   var vUnit = isSab ? tSab : isDom ? tDom : tDia;
   var hIni = ini.getHours() + ini.getMinutes() / 60;
   var duracaoH = (fim - ini) / 3600000;
-  // hFimCorrido: hora de fim em escala corrida (passa da meia noite = >24)
+  // hFimCorrido: hora de fim em escala corrida (meia-noite = 24, 1h = 25, 2h = 26)
   var hFimCorrido = hIni + duracaoH;
   var diarias = 0,
     meiasDiarias = 0,
@@ -1203,19 +1203,18 @@ function calcSessao(checkIn, checkOut, ro) {
 
   // ── TURNO DIURNO: abre entre 08h e 17h ───────────────────────────────────
   if (hIni >= 8 && hIni < 17) {
-    if (hFimCorrido >= 12) {
-      diarias++; // fecha >= 12h → diária completa
-    } else {
-      meiasDiarias++; // fecha < 12h → meia diária
-    }
-    // Horas após 17h (se não virar diária noturna)
+    if (hFimCorrido >= 12) diarias++; // fecha >= 12h → diária completa
+    else meiasDiarias++; // fecha < 12h  → meia diária
+
     if (hFimCorrido > 17) {
       if (hFimCorrido >= 24) {
-        diarias++; // chegou à meia noite → diária noturna
-        if (hFimCorrido > 26) extraH += hFimCorrido - 26; // além das 02h → extra
+        // Chegou à meia-noite ou depois → diária noturna (cobre até 02h = hFim 26)
+        diarias++;
+        // Só conta extra se passar das 02h (hFimCorrido > 26)
+        if (hFimCorrido > 26) extraH += hFimCorrido - 26;
       } else {
-        extraH += hFimCorrido - 17; // hora extra tarde
-        if (hFimCorrido >= 23) addJanta = true; // janta só se fechar >= 23h
+        extraH += hFimCorrido - 17;
+        if (hFimCorrido >= 23) addJanta = true;
       }
     }
   }
@@ -1223,20 +1222,21 @@ function calcSessao(checkIn, checkOut, ro) {
   // ── TURNO NOTURNO: abre entre 17h e 23h59 ────────────────────────────────
   else if (hIni >= 17 && hIni < 24) {
     if (hFimCorrido >= 24) {
-      diarias++; // chegou à meia noite → diária noturna
-      if (hFimCorrido > 26) extraH += hFimCorrido - 26; // além das 02h → extra
+      // Chegou à meia-noite ou depois → diária noturna (cobre até 02h = hFim 26)
+      diarias++;
+      // Só conta extra se passar das 02h (hFimCorrido > 26)
+      if (hFimCorrido > 26) extraH += hFimCorrido - 26;
     } else {
-      extraH += hFimCorrido - hIni; // hora extra
-      if (hFimCorrido >= 23) addJanta = true; // janta só se fechar >= 23h
+      extraH += hFimCorrido - hIni;
+      if (hFimCorrido >= 23) addJanta = true;
     }
   }
 
   // ── MADRUGADA: abre entre 02h e 07h59 ────────────────────────────────────
   else if (hIni >= 2 && hIni < 8) {
     var fimMadrug = Math.min(hFimCorrido, 8);
-    extraH += fimMadrug - hIni; // hora extra até 08h
+    extraH += fimMadrug - hIni;
     if (hFimCorrido > 8) {
-      // continua depois das 08h → regra diurna
       if (hFimCorrido >= 12) diarias++;else meiasDiarias++;
     }
   }
@@ -2395,10 +2395,11 @@ function TabOrcamento({
   }
   function calcDia(diaDef, ro) {
     if (!diaDef.data || !diaDef.entrada || !diaDef.saida) return null;
+    if (diaDef.entrada === diaDef.saida) return null; // entrada = saída → inválido
     var checkIn = diaDef.data + "T" + diaDef.entrada + ":00";
     var checkOut = diaDef.data + "T" + diaDef.saida + ":00";
-    // Se saída <= entrada, assume que passa da meia noite (adiciona 1 dia)
-    if (diaDef.saida <= diaDef.entrada) {
+    // Se saída < entrada → passa da meia noite (ex: 08:00→02:00)
+    if (diaDef.saida < diaDef.entrada) {
       var d = new Date(diaDef.data + "T" + diaDef.saida + ":00");
       d.setDate(d.getDate() + 1);
       checkOut = d.toISOString().slice(0, 19);
